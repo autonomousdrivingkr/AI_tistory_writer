@@ -1,0 +1,32 @@
+{
+  "llm": {
+    "provider": "claude",
+    "model": "claude-sonnet-4-6",
+    "maxTokens": 8000,
+    "temperature": 1
+  },
+  "tistory": {
+    "blogName": "여기에_블로그주소_입력",
+    "defaultCategory": "",
+    "publishVisibility": "public",
+    "publish": true
+  },
+  "schedule": {
+    "slots": {
+      "morning": { "startHour": 4, "endHour": 12 },
+      "evening": { "startHour": 18, "endHour": 24 }
+    }
+  },
+  "selectors": {
+    "titleInput": "#post-title-inp",
+    "tagInput": "#tagText",
+    "modeButton": "#editor-mode-layer-btn-open",
+    "modeHtml": "#editor-mode-html",
+    "codeMirror": ".CodeMirror",
+    "draftCancelText": "취소",
+    "publishOpenText": "완료",
+    "publishConfirmText": "공개 발행"
+  },
+  "gitSync": true,
+  "storageStatePath": "storage_state.json"
+}

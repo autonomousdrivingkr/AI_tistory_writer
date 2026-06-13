@@ -1,0 +1,55 @@
+name: 티스토리 자동 발행 (PC 백업용)
+
+# PC가 꺼져 있을 때를 대비한 클라우드 백업 실행.
+# PC(작업 스케줄러)보다 15분 늦게 돌려서 PC에 우선권을 준다.
+# state.json 의 슬롯 기록으로 중복 발행을 막는다.
+
+on:
+  schedule:
+    - cron: '15 21 * * *'   # 06:15 KST (아침)  = 21:15 UTC 전날
+    - cron: '15 13 * * *'   # 22:15 KST (저녁)  = 13:15 UTC
+  workflow_dispatch:        # 수동 실행 버튼
+
+concurrency:
+  group: tistory-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # state.json 커밋·푸시 권한
+    env:
+      TZ: Asia/Seoul        # 슬롯 자동판별이 KST 기준으로 동작하도록
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      TISTORY_STORAGE_STATE: ${{ secrets.TISTORY_STORAGE_STATE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 의존성 설치
+        run: npm install
+
+      - name: Playwright 브라우저 설치
+        run: npx playwright install --with-deps chromium
+
+      - name: 로그인 세션 복원
+        run: |
+          if [ -z "$TISTORY_STORAGE_STATE" ]; then
+            echo "TISTORY_STORAGE_STATE secret 이 없습니다."; exit 1
+          fi
+          echo "$TISTORY_STORAGE_STATE" | base64 -d > storage_state.json
+
+      - name: 발행 실행
+        run: node src/main.js --slot auto
+
+      - name: 상태 커밋
+        run: |
+          git config user.name "tistory-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add state.json topics.json
+          git diff --staged --quiet || git commit -m "chore: 발행 상태 업데이트 [skip ci]"
+          git push

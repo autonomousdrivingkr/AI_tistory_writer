@@ -1,0 +1,22 @@
+{
+  "name": "ai-tistory-writer",
+  "version": "1.0.0",
+  "description": "Claude로 글을 작성하고 티스토리에 매일 자동 발행하는 봇",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "login": "node src/login.js",
+    "post": "node src/main.js --slot auto",
+    "post:morning": "node src/main.js --slot morning",
+    "post:evening": "node src/main.js --slot evening",
+    "dry": "node src/main.js --slot auto --dry-run --headful",
+    "export-session": "node scripts/export-session.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.0",
+    "dotenv": "^16.4.5",
+    "playwright": "^1.49.0"
+  }
+}
