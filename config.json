@@ -1,9 +1,12 @@
 {
   "llm": {
-    "provider": "claude",
-    "model": "claude-sonnet-4-6",
+    "provider": "gemini",
     "maxTokens": 8000,
-    "temperature": 1
+    "temperature": 1,
+    "models": {
+      "gemini": "gemini-2.0-flash",
+      "claude": "claude-sonnet-4-6"
+    }
   },
   "tistory": {
     "blogName": "여기에_블로그주소_입력",

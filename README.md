@@ -1,17 +1,17 @@
 # AI Tistory Writer 🤖✍️
 
-주제만 적어두면 **Claude가 글을 쓰고 티스토리에 매일 자동 발행**하는 봇입니다.
+주제만 적어두면 **AI가 글을 쓰고 티스토리에 매일 자동 발행**하는 봇입니다. (무료 Gemini로 시작, 한 줄 설정으로 유료 Claude 전환)
 평소엔 내 PC가 발행하고, **PC가 꺼져 있으면 GitHub Actions가 대신** 발행합니다(이중 안전망).
 
 ```
-[topics.json 주제 큐] → [Claude가 글 작성] → [Playwright로 티스토리 발행] → [매일 06:00 / 22:00]
+[topics.json 주제 큐] → [AI가 글 작성] → [Playwright로 티스토리 발행] → [매일 06:00 / 22:00]
 ```
 
 ---
 
 ## 동작 방식
 
-- **매일 아침 6시 / 저녁 10시**, `topics.json` 에서 다음 주제를 꺼내 Claude가 글을 작성하고 발행합니다.
+- **매일 아침 6시 / 저녁 10시**, `topics.json` 에서 다음 주제를 꺼내 AI가 글을 작성하고 발행합니다.
 - 티스토리 공식 API는 사실상 종료되어, **브라우저 자동화(Playwright)** 로 발행합니다. 최초 1회만 직접 로그인해 세션을 저장합니다.
 - **중복 방지**: PC와 GitHub가 둘 다 돌아도 `state.json` 의 "오늘 이 시간대 발행됨" 기록으로 한 번만 발행됩니다. GitHub는 PC보다 15분 늦게 실행되어 PC에 우선권을 줍니다.
 
@@ -26,12 +26,16 @@ npx playwright install chromium
 ```
 
 ### 2. API 키 설정
-`.env.example` 을 `.env` 로 복사하고 Claude API 키를 넣습니다.
+`.env.example` 을 `.env` 로 복사합니다.
 ```powershell
 Copy-Item .env.example .env
 ```
-`.env` 파일을 열어 `ANTHROPIC_API_KEY` 에 키를 붙여넣으세요.
-(키 발급: https://console.anthropic.com → API Keys)
+기본 provider 는 **무료인 Google Gemini** 입니다. `.env` 의 `GEMINI_API_KEY` 에 키를 넣으세요.
+(키 발급: https://aistudio.google.com/apikey — 무료)
+
+> **유료(Claude)로 전환:** `config.json` 의 `llm.provider` 를 `"claude"` 로 바꾸고
+> `.env` 의 `ANTHROPIC_API_KEY` 를 채우면 됩니다. (키 발급: https://console.anthropic.com)
+> provider 별 모델은 `config.json` 의 `llm.models` 에 정의돼 있습니다.
 
 ### 3. 내 블로그 주소 설정
 `config.json` 의 `tistory.blogName` 을 **본인 블로그 주소**로 바꿉니다.
@@ -77,7 +81,8 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-task-scheduler.ps1
    출력된 긴 문자열을 복사 → GitHub 저장소 **Settings → Secrets and variables → Actions → New repository secret**
    - 이름: `TISTORY_STORAGE_STATE`, 값: 복사한 문자열
 2. **API 키도 secret 으로 등록**
-   - 이름: `ANTHROPIC_API_KEY`, 값: Claude API 키
+   - 무료(기본): 이름 `GEMINI_API_KEY`, 값: Gemini API 키
+   - 유료 전환 시: 이름 `ANTHROPIC_API_KEY`, 값: Claude API 키
 3. 코드를 GitHub에 푸시하면 끝. (`.github/workflows/publish.yml` 이 매일 06:15 / 22:15 KST 실행)
 
 > ⚠️ 카카오 로그인 세션은 시간이 지나면 만료됩니다. GitHub 발행이 실패하기 시작하면
@@ -114,7 +119,8 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-task-scheduler.ps1
 
 ## 설정값 (`config.json`)
 
-- `llm.model`: 사용할 Claude 모델. 기본 `claude-sonnet-4-6`(가성비). 더 좋은 품질은 `claude-opus-4-8`.
+- `llm.provider`: `gemini`(무료, 기본) 또는 `claude`(유료). **이 한 줄만 바꾸면 전환됩니다.**
+- `llm.models`: provider 별 모델. 기본 `gemini: gemini-2.0-flash`, `claude: claude-sonnet-4-6`. 더 좋은 Claude 품질은 `claude-opus-4-8`.
 - `tistory.blogName`: 블로그 주소 앞부분.
 - `tistory.publish`: `false` 로 두면 발행 직전까지만 하고 멈춤(테스트용).
 - `tistory.publishVisibility`: `public`(공개) / `private`(비공개).
@@ -126,8 +132,8 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-task-scheduler.ps1
 
 ## 비용 (대략)
 
-Claude Sonnet 기준 글 1편(약 2천 자) 생성 비용은 보통 **수십 원** 수준입니다.
-하루 2편이면 한 달에 대략 **1~2천 원 내외**(사용량/모델에 따라 변동). Opus 모델은 더 비쌉니다.
+- **Gemini(기본, 무료):** 무료 등급으로 하루 1~2편은 비용 0원. 무료 한도(분당/일일 요청 수)만 지키면 됩니다.
+- **Claude(유료 전환 시):** Sonnet 기준 글 1편(약 2천 자) 보통 **수십 원**, 하루 2편이면 한 달 **1~2천 원 내외**(모델에 따라 변동, Opus는 더 비쌈).
 
 ---
 

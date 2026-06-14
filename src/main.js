@@ -59,8 +59,8 @@ async function main() {
   }
   console.log(`📌 주제: ${topicItem.topic}`);
 
-  // 4) Claude로 글 생성
-  console.log('🤖 Claude로 글 생성 중...');
+  // 4) LLM으로 글 생성
+  console.log(`🤖 ${config.llm.provider}(으)로 글 생성 중...`);
   const article = await generateArticle({
     topic: topicItem.topic,
     instructions: topicItem.instructions,
