@@ -35,5 +35,7 @@ function waitForEnter(prompt) {
 
 main().catch((e) => {
   console.error('로그인 중 오류:', e.message);
-  process.exit(1);
+  // process.exit() 동기 호출은 브라우저 파이프 등 비동기 핸들 정리 중 libuv abort 를
+  // 유발할 수 있습니다(UV_HANDLE_CLOSING). exitCode 만 설정해 깨끗이 종료합니다.
+  process.exitCode = 1;
 });

@@ -9,15 +9,21 @@
     }
   },
   "tistory": {
-    "blogName": "여기에_블로그주소_입력",
+    "blogName": "captainzone",
     "defaultCategory": "",
     "publishVisibility": "public",
     "publish": true
   },
   "schedule": {
     "slots": {
-      "morning": { "startHour": 4, "endHour": 12 },
-      "evening": { "startHour": 18, "endHour": 24 }
+      "morning": {
+        "startHour": 4,
+        "endHour": 12
+      },
+      "evening": {
+        "startHour": 18,
+        "endHour": 24
+      }
     }
   },
   "selectors": {

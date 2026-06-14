@@ -119,5 +119,9 @@ ${article.html}
 
 main().catch((e) => {
   console.error('\n❌ 실행 실패:', e.message);
-  process.exit(1);
+  // process.exit(1) 을 동기로 호출하면, 진행 중이던 비동기 핸들(HTTP 소켓·브라우저 파이프)이
+  // 정리되는 도중 libuv 가 "닫히는 중인" 핸들에 접근해 Windows 에서 abort 합니다:
+  //   Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76
+  // exitCode 만 설정하고 이벤트 루프가 자연히 비워지게 두면 핸들이 깨끗하게 닫힌 뒤 종료됩니다.
+  process.exitCode = 1;
 });

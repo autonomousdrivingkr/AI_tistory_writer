@@ -21,17 +21,22 @@ export async function generate({ topic, instructions, config }) {
 
   const ai = new GoogleGenAI({ apiKey });
 
-  const resp = await ai.models.generateContent({
-    model: modelFor(config),
-    contents: buildUserPrompt({ topic, instructions }),
-    config: {
-      systemInstruction: SYSTEM_PROMPT,
-      temperature: config.llm.temperature,
-      maxOutputTokens: config.llm.maxTokens,
-      responseMimeType: 'application/json',
-      responseSchema: ARTICLE_SCHEMA
-    }
-  });
+  let resp;
+  try {
+    resp = await ai.models.generateContent({
+      model: modelFor(config),
+      contents: buildUserPrompt({ topic, instructions }),
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
+        temperature: config.llm.temperature,
+        maxOutputTokens: config.llm.maxTokens,
+        responseMimeType: 'application/json',
+        responseSchema: ARTICLE_SCHEMA
+      }
+    });
+  } catch (e) {
+    throw friendlyError(e, config);
+  }
 
   const text = resp.text;
   if (!text) throw new Error('모델이 글을 생성하지 못했습니다.');
@@ -43,4 +48,17 @@ export async function generate({ topic, instructions, config }) {
     throw new Error('Gemini 응답을 JSON 으로 해석하지 못했습니다.');
   }
   return validateArticle(parsed);
+}
+
+/** SDK 가 던지는 장황한 JSON 에러를 간결하고 행동 가능한 메시지로 바꾼다. */
+function friendlyError(e, config) {
+  const msg = e?.message || String(e);
+  const is429 = e?.status === 429 || /RESOURCE_EXHAUSTED|quota|rate.?limit/i.test(msg);
+  if (is429) {
+    return new Error(
+      `Gemini 무료 한도/쿼터를 초과했습니다 (429, 모델: ${modelFor(config)}). ` +
+      '잠시 후 다시 시도하거나, config.json 의 llm.provider 를 "claude" 로 바꿔 발행하세요.'
+    );
+  }
+  return e instanceof Error ? e : new Error(msg);
 }
