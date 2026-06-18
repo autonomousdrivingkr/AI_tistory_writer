@@ -9,10 +9,15 @@ const ARTICLE_SCHEMA = {
     title: { type: Type.STRING, description: '클릭을 부르면서 검색 키워드를 담은 한국어 제목. 30~45자 권장.' },
     tags: { type: Type.ARRAY, items: { type: Type.STRING }, description: '검색 유입용 키워드 태그 5~8개.' },
     summary: { type: Type.STRING, description: '검색 결과에 노출될 1~2문장 요약(메타 설명).' },
+    imageQueries: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: '본문과 어울리는 사진을 찾기 위한 영어 검색 키워드 3~5개. 사진으로 표현 가능한 구체적 명사/장면 위주(예: "morning coffee desk", "city skyline at night", "hiking mountain trail").'
+    },
     html: { type: Type.STRING, description: '본문 HTML. 시스템 프롬프트의 HTML 규칙을 반드시 준수.' }
   },
-  required: ['title', 'tags', 'summary', 'html'],
-  propertyOrdering: ['title', 'tags', 'summary', 'html']
+  required: ['title', 'tags', 'summary', 'imageQueries', 'html'],
+  propertyOrdering: ['title', 'tags', 'summary', 'imageQueries', 'html']
 };
 
 export async function generate({ topic, instructions, config }) {

@@ -21,12 +21,17 @@ const ARTICLE_TOOL = {
         type: 'string',
         description: '검색 결과에 노출될 1~2문장 요약(메타 설명).'
       },
+      imageQueries: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '본문과 어울리는 사진을 찾기 위한 영어 검색 키워드 3~5개. 사진으로 표현 가능한 구체적 명사/장면 위주(예: "morning coffee desk", "city skyline at night", "hiking mountain trail").'
+      },
       html: {
         type: 'string',
         description: '본문 HTML. 시스템 프롬프트의 HTML 규칙을 반드시 준수.'
       }
     },
-    required: ['title', 'tags', 'summary', 'html']
+    required: ['title', 'tags', 'summary', 'imageQueries', 'html']
   }
 };
 

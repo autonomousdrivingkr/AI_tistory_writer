@@ -47,6 +47,7 @@ export function validateArticle(article) {
     title: String(article.title),
     tags: Array.isArray(article.tags) ? article.tags.map(String) : [],
     summary: article.summary ? String(article.summary) : '',
-    html: String(article.html)
+    html: String(article.html),
+    imageQueries: Array.isArray(article.imageQueries) ? article.imageQueries.map(String) : []
   };
 }

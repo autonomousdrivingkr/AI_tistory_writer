@@ -23,6 +23,7 @@ jobs:
       TZ: Asia/Seoul        # 슬롯 자동판별이 KST 기준으로 동작하도록
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}        # 무료(gemini) provider 용
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}  # 유료(claude) provider 용
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}        # 본문 사진(선택) — 없으면 사진 없이 발행
       TISTORY_STORAGE_STATE: ${{ secrets.TISTORY_STORAGE_STATE }}
     steps:
       - uses: actions/checkout@v4

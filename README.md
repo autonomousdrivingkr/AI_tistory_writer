@@ -37,6 +37,10 @@ Copy-Item .env.example .env
 > `.env` 의 `ANTHROPIC_API_KEY` 를 채우면 됩니다. (키 발급: https://console.anthropic.com)
 > provider 별 모델은 `config.json` 의 `llm.models` 에 정의돼 있습니다.
 
+> **🖼️ 본문 사진(선택):** `.env` 에 무료 `PEXELS_API_KEY` 를 넣으면, AI가 뽑은 키워드로
+> 관련 사진을 찾아 본문 섹션마다 자동 삽입합니다. (키 발급: https://www.pexels.com/api/ — 무료)
+> 키가 없으면 그냥 사진 없이 글만 발행됩니다(에러 아님). 끄려면 `config.json` 의 `images.enabled` 를 `false` 로.
+
 ### 3. 내 블로그 주소 설정
 `config.json` 의 `tistory.blogName` 을 **본인 블로그 주소**로 바꿉니다.
 예: 블로그가 `https://myblog.tistory.com` 이면 → `"blogName": "myblog"`
@@ -83,6 +87,7 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-task-scheduler.ps1
 2. **API 키도 secret 으로 등록**
    - 무료(기본): 이름 `GEMINI_API_KEY`, 값: Gemini API 키
    - 유료 전환 시: 이름 `ANTHROPIC_API_KEY`, 값: Claude API 키
+   - 사진 사용 시(선택): 이름 `PEXELS_API_KEY`, 값: Pexels API 키
 3. 코드를 GitHub에 푸시하면 끝. (`.github/workflows/publish.yml` 이 매일 06:15 / 22:15 KST 실행)
 
 > ⚠️ 카카오 로그인 세션은 시간이 지나면 만료됩니다. GitHub 발행이 실패하기 시작하면
@@ -124,6 +129,8 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-task-scheduler.ps1
 - `tistory.blogName`: 블로그 주소 앞부분.
 - `tistory.publish`: `false` 로 두면 발행 직전까지만 하고 멈춤(테스트용).
 - `tistory.publishVisibility`: `public`(공개) / `private`(비공개).
+- `images.enabled`: `true` 면 본문에 관련 사진을 자동 삽입(무료 `PEXELS_API_KEY` 필요).
+- `images.perArticle`: 글 1편에 넣을 사진 수(기본 3). `images.orientation`: `landscape`/`portrait`/`square`.
 - `schedule.slots`: 아침/저녁 시간대 범위(슬롯 자동 판별용).
 - `selectors`: 티스토리 에디터 요소 셀렉터(에디터 변경 시 조정).
 - `gitSync`: `true` 면 발행 후 state를 git에 자동 커밋·푸시(PC↔GitHub 동기화).

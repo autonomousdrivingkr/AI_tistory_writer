@@ -6,6 +6,7 @@ import {
   pickNextTopic, markTopicDone, pendingCount
 } from './queue.js';
 import { generateArticle } from './generator.js';
+import { attachImages } from './images.js';
 import { publishToTistory } from './publisher.js';
 import { pullLatest, pushState } from './git-sync.js';
 
@@ -69,6 +70,11 @@ async function main() {
   console.log(`   제목: ${article.title}`);
   console.log(`   태그: ${article.tags.join(', ')}`);
   console.log(`   본문 길이: ${article.html.length}자`);
+
+  // 4.5) 관련 사진 삽입 (config.images.enabled && PEXELS_API_KEY 필요, 실패해도 글은 계속)
+  const { html: htmlWithImages, images } = await attachImages(article, config);
+  article.html = htmlWithImages;
+  if (images.length) console.log(`   🖼️  사진 ${images.length}장 삽입`);
 
   // 5) dry-run 이면 파일로만 저장하고 종료
   if (opts.dryRun) {
