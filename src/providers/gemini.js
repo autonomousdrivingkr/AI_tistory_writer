@@ -53,11 +53,24 @@ export async function generate({ topic, instructions, config }) {
 /** SDK 가 던지는 장황한 JSON 에러를 간결하고 행동 가능한 메시지로 바꾼다. */
 function friendlyError(e, config) {
   const msg = e?.message || String(e);
+  const model = modelFor(config);
   const is429 = e?.status === 429 || /RESOURCE_EXHAUSTED|quota|rate.?limit/i.test(msg);
   if (is429) {
+    // limit: 0 → 이 모델의 무료 티어 할당 자체가 막힌 경우. 재시도해도 영원히 안 풀린다.
+    // (쿼터는 키가 아니라 프로젝트 단위라 키를 새로 만들어도 동일하다.)
+    if (/limit:\s*0\b/.test(msg)) {
+      return new Error(
+        `'${model}' 은(는) 이 프로젝트에서 무료 사용이 막혀 있습니다 (무료 한도 0). ` +
+        '키를 새로 만들어도 동일합니다(쿼터는 프로젝트 단위). ' +
+        'config.json 의 llm.models.gemini 를 "gemini-2.5-flash" 등 다른 모델로 바꾸거나, ' +
+        'llm.provider 를 "claude" 로 바꿔 발행하세요.'
+      );
+    }
+    const retry = msg.match(/retry in ([\d.]+)s/i)?.[1];
     return new Error(
-      `Gemini 무료 한도/쿼터를 초과했습니다 (429, 모델: ${modelFor(config)}). ` +
-      '잠시 후 다시 시도하거나, config.json 의 llm.provider 를 "claude" 로 바꿔 발행하세요.'
+      `Gemini 무료 분당/일일 한도를 초과했습니다 (429, 모델: ${model}). ` +
+      (retry ? `약 ${Math.ceil(Number(retry))}초 후 ` : '잠시 후 ') +
+      '다시 시도하거나, config.json 의 llm.provider 를 "claude" 로 바꿔 발행하세요.'
     );
   }
   return e instanceof Error ? e : new Error(msg);
