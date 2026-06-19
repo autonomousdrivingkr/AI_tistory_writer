@@ -37,6 +37,11 @@ export async function publishToTistory(article, config, opts = {}) {
     const url = `https://${blogName}.tistory.com/manage/newpost/`;
     await page.goto(url, { waitUntil: 'domcontentloaded' });
 
+    // 세션이 만료되면 글쓰기 페이지 대신 로그인 화면(카카오 로그인)으로 튕긴다.
+    // 이 경우 제목 셀렉터를 20초 기다리다 의미 불명한 타임아웃으로 끝나므로,
+    // 여기서 먼저 감지해 무엇을 해야 하는지 분명한 에러로 빠르게 실패시킨다.
+    await ensureLoggedIn(page);
+
     // "작성 중인 글이 있습니다" 같은 임시저장 팝업이 뜨면 닫는다(새 글로 시작).
     await dismissDraftDialog(page, sel);
 
@@ -67,18 +72,46 @@ export async function publishToTistory(article, config, opts = {}) {
   }
 }
 
+async function ensureLoggedIn(page) {
+  // 1) URL 기준: 글쓰기 페이지가 아니라 티스토리/카카오 로그인 페이지로 리다이렉트됐는가?
+  const cur = page.url();
+  const onLoginUrl = /\/auth\/login|accounts\.kakao\.com|kauth\.kakao\.com/.test(cur);
+
+  // 2) 화면 기준: "카카오계정으로 로그인" 버튼/문구가 보이는가? (URL 이 모호한 경우 대비)
+  const kakaoBtn = page.getByText('카카오계정으로 로그인', { exact: false });
+  const onLoginScreen = await kakaoBtn.first().isVisible({ timeout: 2000 }).catch(() => false);
+
+  if (onLoginUrl || onLoginScreen) {
+    throw new Error(
+      '티스토리 로그인 세션이 만료되었습니다 (로그인 화면으로 리다이렉트됨).\n' +
+      '  → 해결: "npm run login" 을 실행해 카카오 로그인을 다시 마치고 세션을 새로 저장하세요.\n' +
+      '  → GitHub Actions 도 쓴다면 "npm run export-session" 결과로 TISTORY_STORAGE_STATE 시크릿도 갱신하세요.'
+    );
+  }
+}
+
 async function dismissDraftDialog(page, sel) {
-  // 네이티브 confirm 대화상자 자동 취소
-  page.once('dialog', (d) => d.dismiss().catch(() => {}));
+  // 임시저장 복구 confirm 은 취소(=새 글로 시작). 핸들러는 이 함수 안에서만 살아있도록
+  // on/off 로 스코프를 잡는다. once 로 남겨두면 이후 HTML 모드 confirm 을 잡아먹어 취소시킨다.
+  const dismissDialog = (d) => d.dismiss().catch(() => {});
+  page.on('dialog', dismissDialog);
   try {
     const cancel = page.getByRole('button', { name: sel.draftCancelText });
     await cancel.click({ timeout: 3000 });
   } catch {
     // 팝업이 없으면 무시
+  } finally {
+    page.off('dialog', dismissDialog);
   }
 }
 
 async function switchToHtmlMode(page, sel) {
+  // 티스토리는 HTML 모드로 바꿀 때 native confirm("HTML모드로 변경 …")을 띄운다.
+  // 이 confirm 을 반드시 accept 해야 실제로 전환된다. 핸들러가 없거나 늦게 등록되면
+  // Playwright 가 자동 dismiss(취소) → 전환 실패 → CodeMirror 가 숨겨진 채로 남는다.
+  // 그래서 클릭 *전에* accept 핸들러를 등록한다.
+  const acceptDialog = (d) => d.accept().catch(() => {});
+  page.on('dialog', acceptDialog);
   try {
     await page.locator(sel.modeButton).first().click({ timeout: 8000 });
     await page.locator(sel.modeHtml).first().click({ timeout: 5000 });
@@ -91,15 +124,20 @@ async function switchToHtmlMode(page, sel) {
       console.warn('⚠️  HTML 모드 전환 실패 — 기본 에디터에 입력합니다. 셀렉터 조정이 필요할 수 있습니다.');
     }
   }
-  // 모드 전환 확인 팝업이 뜨면 수락
-  page.once('dialog', (d) => d.accept().catch(() => {}));
-  await page.waitForTimeout(800);
+  // CodeMirror(HTML 에디터)가 실제로 보일 때까지 대기 → 전환 완료를 직접 확인한다.
+  try {
+    await page.locator(sel.codeMirror).first().waitFor({ state: 'visible', timeout: 8000 });
+  } catch {
+    console.warn('⚠️  HTML 에디터가 보이지 않습니다 — 모드 전환이 안 됐을 수 있습니다.');
+  } finally {
+    page.off('dialog', acceptDialog);
+  }
 }
 
 async function typeHtmlBody(page, sel, html) {
   // CodeMirror(HTML 모드) 우선
   const cm = page.locator(sel.codeMirror).first();
-  if (await cm.count()) {
+  if (await cm.count() && await cm.isVisible().catch(() => false)) {
     await cm.click();
     await page.keyboard.press('Control+A');
     await page.keyboard.press('Delete');

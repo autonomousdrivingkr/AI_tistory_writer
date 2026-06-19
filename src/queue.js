@@ -49,6 +49,12 @@ export function pickNextTopic() {
   return topics.find((t) => t.status === 'pending') || null;
 }
 
+/** pending 주제 전체 목록 반환 (테스트 발행 시 주제 선택용) */
+export function listPendingTopics() {
+  const topics = readJson(TOPICS_PATH, []);
+  return topics.filter((t) => t.status === 'pending');
+}
+
 /** 주제를 발행 완료로 표시 */
 export function markTopicDone(topic, meta = {}) {
   const topics = readJson(TOPICS_PATH, []);

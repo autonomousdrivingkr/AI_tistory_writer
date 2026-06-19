@@ -1,9 +1,10 @@
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import { loadConfig, runSource, ROOT } from './config.js';
 import {
   currentSlot, slotKey, isPublished, recordPublished,
-  pickNextTopic, markTopicDone, pendingCount
+  pickNextTopic, listPendingTopics, markTopicDone, pendingCount
 } from './queue.js';
 import { generateArticle } from './generator.js';
 import { attachImages } from './images.js';
@@ -20,7 +21,10 @@ function parseArgs() {
     slot: get('--slot') || 'auto',
     dryRun: args.includes('--dry-run'),
     headful: args.includes('--headful'),
-    force: args.includes('--force')
+    noPublish: args.includes('--no-publish'),
+    force: args.includes('--force'),
+    // 자동화(스케줄러에서 TTY 가 잡히는 드문 경우 등)에서 프롬프트를 강제로 끄는 탈출구
+    yes: args.includes('--yes') || args.includes('-y')
   };
 }
 
@@ -53,7 +57,11 @@ async function main() {
   }
 
   // 3) 다음 주제 선택
-  const topicItem = pickNextTopic();
+  //    사람이 터미널에서 직접 실행한 경우(=TTY 가 있고 CI/--yes 가 아닌 경우)에는
+  //    dry-run·no-publish·실제발행 어느 쪽이든 주제를 직접 고르거나 새로 입력할 수 있게 한다.
+  //    자동 발행(스케줄러·CI 는 TTY 없음)에서는 기존대로 첫 pending 주제를 자동 선택.
+  const interactive = process.stdin.isTTY && !process.env.CI && !opts.yes;
+  const topicItem = interactive ? await chooseTopicInteractive() : pickNextTopic();
   if (!topicItem) {
     console.log(`📭 발행할 주제가 없습니다. topics.json 에 주제를 추가하세요. (남은 주제: ${pendingCount()})`);
     return;
@@ -88,8 +96,16 @@ async function main() {
   }
 
   // 6) 티스토리 발행
-  console.log('🚀 티스토리에 발행 중...');
+  //    --no-publish: 브라우저에 제목/본문/태그 입력까지만 하고 최종 발행은 건너뛴다(에디터 동작 확인용).
+  if (opts.noPublish) config.tistory = { ...config.tistory, publish: false };
+  console.log(opts.noPublish ? '🧪 티스토리 에디터 입력 테스트 중 (--no-publish)...' : '🚀 티스토리에 발행 중...');
   const { url } = await publishToTistory(article, config, { headful: opts.headful });
+
+  // --no-publish 는 상태 기록/커밋/주제 소진을 모두 건너뛴다 (반복 테스트해도 데이터가 안 망가지게).
+  if (opts.noPublish) {
+    console.log('🧪 --no-publish: 입력 동작만 확인하고 종료 (상태 기록·커밋·주제 소진 생략).\n');
+    return;
+  }
   console.log(`   발행됨: ${url || '(URL 확인 불가 — 블로그 관리에서 확인하세요)'}`);
 
   // 7) 상태 기록
@@ -108,6 +124,49 @@ async function main() {
   if (config.gitSync) pushState(`chore: 발행 ${slotKey(slot, now)} (${source})`);
 
   console.log('🎉 완료!\n');
+}
+
+/**
+ * 테스트 발행 시 대화형으로 주제를 선택/입력한다.
+ *  - Enter        → 기본 주제(첫 번째 대기 주제)
+ *  - 번호         → 해당 대기 주제
+ *  - 그 외 텍스트 → 직접 입력한 임시 주제(세부 지시사항도 물어봄)
+ * 반환: 주제 객체 또는 null(주제 없음·취소)
+ */
+async function chooseTopicInteractive() {
+  const pending = listPendingTopics();
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    if (pending.length) {
+      console.log('\n📋 대기 중인 주제:');
+      pending.forEach((t, i) => {
+        console.log(`   ${i + 1}) ${t.topic}${i === 0 ? '   ← 기본' : ''}`);
+      });
+    } else {
+      console.log('\n📭 대기 중인 주제가 없습니다. 테스트할 주제를 직접 입력하세요.');
+    }
+
+    const answer = (await rl.question(
+      '\n👉 Enter=기본 주제 / 번호=해당 주제 / 직접 입력=새 주제 : '
+    )).trim();
+
+    // Enter → 기본(첫 번째 대기 주제)
+    if (answer === '') return pending[0] || null;
+
+    // 번호 선택
+    const n = Number(answer);
+    if (Number.isInteger(n) && n >= 1 && n <= pending.length) {
+      return pending[n - 1];
+    }
+
+    // 그 외 → 직접 입력한 임시 주제 (테스트용이므로 topics.json 에는 저장하지 않음)
+    const instructions = (await rl.question(
+      '   세부 지시사항(선택, Enter 로 건너뛰기): '
+    )).trim();
+    return { topic: answer, instructions, status: 'pending' };
+  } finally {
+    rl.close();
+  }
 }
 
 function renderPreview(article) {

@@ -35,12 +35,24 @@ export async function generate({ topic, instructions, config }) {
         systemInstruction: SYSTEM_PROMPT,
         temperature: config.llm.temperature,
         maxOutputTokens: config.llm.maxTokens,
+        // 2.5 계열은 thinking(추론) 모델이라 기본적으로 출력 토큰 예산을 추론에 먼저 써버린다.
+        // 추론을 끄면 maxOutputTokens 전부가 본문 JSON 출력에 쓰여 잘림을 막는다.
+        thinkingConfig: { thinkingBudget: 0 },
         responseMimeType: 'application/json',
         responseSchema: ARTICLE_SCHEMA
       }
     });
   } catch (e) {
     throw friendlyError(e, config);
+  }
+
+  // 토큰 한도에 걸려 응답이 중간에 잘리면 JSON 이 깨진다. 모호한 파싱 에러 대신 원인을 명확히 알린다.
+  const finishReason = resp.candidates?.[0]?.finishReason;
+  if (finishReason === 'MAX_TOKENS') {
+    throw new Error(
+      `응답이 토큰 한도(maxTokens: ${config.llm.maxTokens})에 걸려 중간에 잘렸습니다. ` +
+      'config.json 의 llm.maxTokens 를 더 크게(예: 16000~20000) 올리세요.'
+    );
   }
 
   const text = resp.text;
@@ -50,7 +62,10 @@ export async function generate({ topic, instructions, config }) {
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error('Gemini 응답을 JSON 으로 해석하지 못했습니다.');
+    throw new Error(
+      'Gemini 응답을 JSON 으로 해석하지 못했습니다. ' +
+      '응답이 잘렸을 가능성이 큽니다 — config.json 의 llm.maxTokens 를 올려보세요.'
+    );
   }
   return validateArticle(parsed);
 }

@@ -11,6 +11,8 @@
     "post": "node src/main.js --slot auto",
     "post:morning": "node src/main.js --slot morning",
     "post:evening": "node src/main.js --slot evening",
+    "post:test": "node src/main.js --slot morning --headful --no-publish --force",
+    "post:test:publish": "node src/main.js --slot morning --headful --force",
     "dry": "node src/main.js --slot auto --dry-run --headful",
     "export-session": "node scripts/export-session.js"
   },
