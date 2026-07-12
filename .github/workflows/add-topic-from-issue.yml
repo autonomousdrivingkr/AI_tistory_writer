@@ -17,7 +17,9 @@ concurrency:
 
 jobs:
   add-topic:
-    if: contains(github.event.issue.labels.*.name, 'new-topic')
+    # 라벨(new-topic)에 기대지 않는다 — 일부 클라이언트(GitHub 모바일 앱 등)는 이슈 폼의
+    # 자동 라벨 지정을 적용하지 않는 경우가 있어, 폼 본문 구조("### 주제" 항목 존재)로 판별한다.
+    if: contains(github.event.issue.body, '### 주제')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
