@@ -30,6 +30,7 @@ export async function researchTopic({ topic, instructions, config }) {
   const maxSources = rc.maxSources || 5;
   const briefings = [];
   const sources = [];
+  const places = [];
   const used = [];
 
   for (const name of order) {
@@ -38,6 +39,7 @@ export async function researchTopic({ topic, instructions, config }) {
       if (result?.briefing) {
         briefings.push(`[${LABELS[name]}]\n${result.briefing}`);
         sources.push(...(result.sources || []));
+        places.push(...(result.places || []));
         used.push(name);
       }
     } catch (e) {
@@ -54,6 +56,7 @@ export async function researchTopic({ topic, instructions, config }) {
   return {
     briefing: briefings.join('\n\n'),
     sources: dedupeSources(sources, maxSources),
+    places: dedupePlaces(places),
     providers: used
   };
 }
@@ -98,6 +101,18 @@ function dedupeSources(sources, limit) {
   return out;
 }
 
+/** 상호명 중복 제거(같은 곳이 지역검색에 두 번 잡히는 경우 방지). */
+function dedupePlaces(places) {
+  const seen = new Set();
+  const out = [];
+  for (const p of places) {
+    if (!p?.name || seen.has(p.name)) continue;
+    seen.add(p.name);
+    out.push(p);
+  }
+  return out;
+}
+
 /**
  * 참고 자료 출처를 본문 끝에 붙일 "참고 자료" 링크 HTML 로 만든다(없으면 '').
  * related.js 의 "함께 읽으면 좋은 글" 과 같은 패턴.
@@ -110,6 +125,25 @@ export function sourceLinksHtml(sources) {
     .map((s) => `<li><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener">${escapeHtml(s.title)}</a></li>`)
     .join('');
   return `\n<h2>참고 자료</h2>\n<ul>${items}</ul>\n`;
+}
+
+/**
+ * 본문에 등장하는 실존 업체의 지도 링크(네이버지도·구글지도)를 목록으로 붙인다(없으면 '').
+ * 독자가 클릭해서 바로 위치를 찾아갈 수 있도록 하기 위함(naver.js 의 buildPlaces 참고).
+ */
+export function placeLinksHtml(places) {
+  const shown = (places || []).filter((p) => p?.name && (p.naverMapUrl || p.googleMapUrl));
+  if (!shown.length) return '';
+  const items = shown
+    .map((p) => {
+      const links = [
+        p.naverMapUrl ? `<a href="${escapeHtml(p.naverMapUrl)}" target="_blank" rel="noopener">네이버지도</a>` : '',
+        p.googleMapUrl ? `<a href="${escapeHtml(p.googleMapUrl)}" target="_blank" rel="noopener">구글지도</a>` : ''
+      ].filter(Boolean).join(' · ');
+      return `<li>${escapeHtml(p.name)} — ${links}</li>`;
+    })
+    .join('');
+  return `\n<h2>위치 찾아가기</h2>\n<ul>${items}</ul>\n`;
 }
 
 function escapeHtml(s) {

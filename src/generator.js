@@ -36,5 +36,6 @@ export async function generateArticle({ topic, instructions, config }) {
 
   const article = await impl({ topic, instructions, config, research });
   if (research?.sources?.length) article.sources = research.sources;
+  if (research?.places?.length) article.places = research.places;
   return article;
 }

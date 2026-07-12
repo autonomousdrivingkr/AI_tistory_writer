@@ -30,7 +30,8 @@ export async function researchWithNaver({ topic, instructions, config }) {
 
   const briefing = buildBriefing(local, blog);
   const sources = buildSources(blog, local, rc.maxSources || 5);
-  return { briefing, sources, provider: 'naver' };
+  const places = buildPlaces(local);
+  return { briefing, sources, places, provider: 'naver' };
 }
 
 /** 검색어: 주제를 그대로 쓰되, 앞뒤 공백/기호만 정리. */
@@ -104,6 +105,30 @@ function buildSources(blog, local, limit) {
     if (sources.length >= limit) break;
   }
   return sources;
+}
+
+/**
+ * 지역검색 결과를 지도 링크(네이버지도·구글지도)로 변환한다.
+ * 네이버 지역검색은 place id 를 안 주므로, 좌표 대신 "상호명+주소" 검색 링크로 연결한다
+ * (좌표 변환 없이도 항상 정확한 위치로 이동함).
+ */
+function buildPlaces(local) {
+  const seen = new Set();
+  const places = [];
+  for (const it of local) {
+    const name = stripTags(it.title);
+    const address = stripTags(it.roadAddress || it.address);
+    if (!name || !address || seen.has(name)) continue;
+    seen.add(name);
+    const query = encodeURIComponent(`${name} ${address}`);
+    places.push({
+      name,
+      address,
+      naverMapUrl: `https://map.naver.com/p/search/${query}`,
+      googleMapUrl: `https://www.google.com/maps/search/?api=1&query=${query}`
+    });
+  }
+  return places;
 }
 
 /** 네이버 응답의 <b> 태그·HTML 엔티티를 제거해 순수 텍스트로. */

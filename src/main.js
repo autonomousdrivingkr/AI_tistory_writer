@@ -9,7 +9,7 @@ import {
 import { generateArticle } from './generator.js';
 import { attachImages, cleanupTemp } from './images.js';
 import { relatedLinksHtml } from './related.js';
-import { sourceLinksHtml } from './research.js';
+import { sourceLinksHtml, placeLinksHtml } from './research.js';
 import { publishToTistory } from './publisher.js';
 import { pullLatest, pushState } from './git-sync.js';
 
@@ -152,6 +152,15 @@ async function runForBlog({ blog, slot, now, opts, config, source, rl }) {
     if (sources) {
       article.html += sources;
       console.log('   🔎 참고 자료 출처 링크 추가');
+    }
+  }
+
+  // 실존 업체 지도 링크(네이버 지역검색으로 찾은 상호에 한함) — 독자가 클릭해서 바로 찾아갈 수 있도록.
+  if ((config.research?.attachSources ?? true) && article.places?.length) {
+    const places = placeLinksHtml(article.places);
+    if (places) {
+      article.html += places;
+      console.log(`   📍 위치(지도) 링크 추가 (${article.places.length}곳)`);
     }
   }
 
