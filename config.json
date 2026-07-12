@@ -8,11 +8,40 @@
       "claude": "claude-sonnet-4-6"
     }
   },
+  "research": {
+    "enabled": true,
+    "strategy": "auto",
+    "maxSources": 5,
+    "stopWhenEnough": true,
+    "attachSources": true,
+    "models": {
+      "gemini": "gemini-2.5-flash"
+    },
+    "localKeywords": [
+      "맛집", "카페", "근처", "주변", "골프", "CC", "컨트리클럽", "여행", "숙소",
+      "호텔", "펜션", "리조트", "가볼만한", "데이트", "코스", "명소", "축제", "시장"
+    ]
+  },
   "tistory": {
-    "blogName": "captainzone",
-    "defaultCategory": "",
+    "publish": true,
     "publishVisibility": "public",
-    "publish": true
+    "defaultBlog": "captainzone",
+    "blogs": [
+      {
+        "id": "captainzone",
+        "label": "메인 블로그",
+        "blogName": "captainzone",
+        "topicsFile": "topics.captainzone.json",
+        "defaultCategory": ""
+      },
+      {
+        "id": "marvel-ironman",
+        "label": "마블 아이언맨",
+        "blogName": "marvel-ironman",
+        "topicsFile": "topics.marvel-ironman.json",
+        "defaultCategory": ""
+      }
+    ]
   },
   "images": {
     "enabled": true,
@@ -38,6 +67,10 @@
     "modeButton": "#editor-mode-layer-btn-open",
     "modeHtml": "#editor-mode-html",
     "codeMirror": ".CodeMirror",
+    "imageFileInput": "input[type=\"file\"]",
+    "imageButton": "[id*=\"image\"], [aria-label*=\"사진\"], [class*=\"btn-image\"]",
+    "attachButton": "[aria-label=\"첨부\"]:visible",
+    "attachImageItem": "#attach-image:visible",
     "draftCancelText": "취소",
     "publishOpenText": "완료",
     "publishConfirmText": "공개 발행"

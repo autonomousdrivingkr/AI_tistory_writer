@@ -1,7 +1,7 @@
 import { chromium } from 'playwright';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT } from './config.js';
+import { ROOT, getBlogs, resolveBlog } from './config.js';
 
 const LOGS_DIR = join(ROOT, 'logs');
 
@@ -11,20 +11,25 @@ const LOGS_DIR = join(ROOT, 'logs');
  *
  * @param {{title:string, tags:string[], html:string}} article
  * @param {object} config
- * @param {{headful?:boolean}} opts
+ * @param {{headful?:boolean, blog?:object, thumbnailPath?:string}} opts
+ *        blog: resolveBlog() 로 합쳐진 블로그 설정
+ *        thumbnailPath: 티스토리에 올려 대표이미지(썸네일)로 쓸 로컬 이미지 경로(선택)
  * @returns {Promise<{url:string|null}>}
  */
 export async function publishToTistory(article, config, opts = {}) {
-  const storagePath = join(ROOT, config.storageStatePath || 'storage_state.json');
+  // 호출부가 블로그를 지정하지 않으면 첫 번째(기본) 블로그로 발행한다.
+  const blog = opts.blog || resolveBlog(config, getBlogs(config)[0]);
+
+  const storagePath = join(ROOT, blog.storageStatePath || 'storage_state.json');
   if (!existsSync(storagePath)) {
     throw new Error(
       `로그인 세션 파일이 없습니다: ${storagePath}\n먼저 "npm run login" 으로 로그인하세요.`
     );
   }
 
-  const blogName = config.tistory.blogName;
+  const blogName = blog.blogName;
   if (!blogName || blogName.includes('여기에')) {
-    throw new Error('config.json 의 tistory.blogName 을 실제 블로그 주소로 바꾸세요.');
+    throw new Error('config.json 의 blogs[].blogName 을 실제 블로그 주소로 바꾸세요.');
   }
 
   const sel = config.selectors;
@@ -51,15 +56,27 @@ export async function publishToTistory(article, config, opts = {}) {
     await title.click();
     await title.fill(article.title);
 
+    // 1.5) 대표 이미지 업로드 (썸네일용)
+    //   HTML 모드로 바꾸기 *전*(기본 에디터)에서 올려야 업로드가 동작한다.
+    //   업로드된 이미지는 HTML 모드 전환 시 [##_Image|…##] 매크로로 소스에 남고,
+    //   typeHtmlBody 가 이를 본문 맨 앞에 보존한다. → 티스토리가 대표이미지로 잡음.
+    if (opts.thumbnailPath) {
+      await uploadRepresentativeImage(page, sel, opts.thumbnailPath);
+    }
+
     // 2) HTML 모드로 전환 후 본문 입력
     await switchToHtmlMode(page, sel);
-    await typeHtmlBody(page, sel, article.html);
+    const preservedSource = await typeHtmlBody(page, sel, article.html);
+
+    // 2.5) 대표 이미지가 실제로 티스토리 소스(매크로)로 반영됐는지 확인.
+    //   업로드가 에디터에 안 붙으면 조용히 썸네일만 사라지므로, 매 발행마다 명확히 로그로 남긴다.
+    if (opts.thumbnailPath) verifyThumbnailMacro(preservedSource);
 
     // 3) 태그 입력
     await fillTags(page, sel, article.tags || []);
 
     // 4) 발행
-    const postUrl = await publish(page, sel, config);
+    const postUrl = await publish(page, sel, blog);
 
     await context.close();
     await browser.close();
@@ -134,20 +151,118 @@ async function switchToHtmlMode(page, sel) {
   }
 }
 
+/**
+ * 대표 이미지를 티스토리 서버에 업로드한다 (기본 에디터 모드에서 호출).
+ * 외부 링크(Pexels) 사진만 있으면 티스토리가 썸네일을 못 만들기 때문에, 1장을 실제로 올린다.
+ * 부가 기능이므로 실패해도 발행은 막지 않는다(썸네일만 없을 뿐).
+ */
+async function uploadRepresentativeImage(page, sel, imagePath) {
+  try {
+    // 새 에디터(TinyMCE)에는 상시 존재하는 파일 input 이 없다.
+    // "첨부" 메뉴 → "사진" 을 클릭해야 파일 선택창이 열리므로,
+    // 클릭 *전에* filechooser 대기를 걸어두고 열리는 선택창에 바로 파일을 넣는다.
+    // 툴바(TinyMCE)는 제목 입력창보다 늦게 렌더링될 수 있어 보일 때까지 기다린다.
+    // 같은 aria-label 의 숨은 복제 요소가 있으므로 반드시 :visible 로 골라야 한다.
+    const attach = page.locator(sel.attachButton || '[aria-label="첨부"]:visible').first();
+    const hasAttach = await attach
+      .waitFor({ state: 'visible', timeout: 8000 })
+      .then(() => true, () => false);
+    if (hasAttach) {
+      const chooser = page.waitForEvent('filechooser', { timeout: 8000 });
+      await attach.click({ timeout: 3000 });
+      await page.locator(sel.attachImageItem || '#attach-image:visible').first().click({ timeout: 3000 });
+      await (await chooser).setFiles(imagePath);
+    } else {
+      // 구 에디터 폴백: 페이지에 이미 있는 파일 input 에 직접 넣는다.
+      // .first() 로 아무거나 잡으면 이미지가 아닌 input(동영상/파일)에 들어가 업로드가 무시되므로
+      // accept 에 image 가 들어간 input 을 우선 고른다.
+      const preferImage = 'input[type="file"][accept*="image" i]';
+      let input = page.locator(preferImage).first();
+
+      if (!(await input.count())) {
+        const inputSel = sel.imageFileInput || 'input[type="file"]';
+        if (!(await page.locator(inputSel).count()) && sel.imageButton) {
+          await page.locator(sel.imageButton).first().click({ timeout: 3000 }).catch(() => {});
+        }
+        input = (await page.locator(preferImage).count())
+          ? page.locator(preferImage).first()
+          : page.locator(inputSel).first();
+      }
+
+      // 숨은 input 이라도 setInputFiles 는 동작한다(보임 상태가 아니라 attached 만 기다린다).
+      await input.waitFor({ state: 'attached', timeout: 5000 });
+      await input.setInputFiles(imagePath);
+    }
+
+    // 업로드 완료 = 에디터 본문에 카카오 CDN 이미지가 나타나는 것. 고정 대기 대신 이를 기다린다.
+    await waitForUploadedImage(page);
+    console.log('   🖼️  대표 이미지 업로드 시도 완료 — HTML 소스에서 매크로 반영 여부를 재확인합니다.');
+    return true;
+  } catch (e) {
+    console.warn(`⚠️  대표 이미지 업로드 실패 — 썸네일 없이 진행합니다. (${e.message})`);
+    return false;
+  }
+}
+
+/**
+ * 업로드한 이미지가 에디터 본문(iframe 포함)에 카카오 CDN 주소로 나타날 때까지 대기.
+ * 시간 안에 안 나타나도 발행은 계속한다 — 최종 판정은 verifyThumbnailMacro 가 한다.
+ */
+async function waitForUploadedImage(page, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const frame of page.frames()) {
+      const n = await frame.locator('img[src*="kakaocdn"], img[src*="daumcdn"]').count().catch(() => 0);
+      if (n) {
+        await page.waitForTimeout(1000); // 에디터가 매크로를 소스에 반영할 시간
+        return;
+      }
+    }
+    await page.waitForTimeout(500);
+  }
+  console.warn('   ⚠️  업로드된 이미지가 에디터에 나타나지 않았습니다 (15초 초과).');
+}
+
+/**
+ * 대표 이미지가 티스토리 본문 소스에 실제로 반영됐는지 확인해 로그로 남긴다.
+ * 기본 에디터에서 업로드가 성공하면 HTML 소스에 [##_Image|…##] 매크로(또는 kakaocdn 이미지)가 남는다.
+ * 이게 있어야만 티스토리가 목록 썸네일/og:image 를 잡는다 — 썸네일 성공의 유일한 근거다.
+ */
+function verifyThumbnailMacro(preservedSource) {
+  const hasMacro = /\[##_Image\||kakaocdn|daumcdn/i.test(preservedSource || '');
+  if (hasMacro) {
+    console.log('   ✅ 대표 이미지가 본문 소스에 반영됨 — 티스토리가 목록 썸네일/og:image 로 잡습니다.');
+  } else {
+    console.warn(
+      '   ⚠️  대표 이미지가 본문 소스(HTML)에 없습니다 — 업로드가 에디터에 반영되지 않았습니다.\n' +
+      '      → 이대로면 썸네일이 안 잡힙니다. selectors.imageFileInput / imageButton 을 점검하세요.'
+    );
+  }
+}
+
+/**
+ * 본문 HTML 을 에디터에 입력한다.
+ * @returns {Promise<string>} 입력 전 소스에 이미 있던 내용(=업로드된 대표 이미지 매크로). 썸네일 검증용.
+ */
 async function typeHtmlBody(page, sel, html) {
   // CodeMirror(HTML 모드) 우선
   const cm = page.locator(sel.codeMirror).first();
   if (await cm.count() && await cm.isVisible().catch(() => false)) {
+    // 기본 에디터에서 올린 대표 이미지는 HTML 소스에 [##_Image|…##] 매크로로 들어와 있다.
+    // Ctrl+A/Delete 로 지우면 이미지가 사라져 썸네일도 없어지므로, 먼저 읽어 본문 맨 앞에 보존한다.
+    const existing = await cm.evaluate((el) => (el.CodeMirror ? el.CodeMirror.getValue() : '')).catch(() => '');
+    const merged = existing.trim() ? existing.trim() + '\n' + html : html;
     await cm.click();
     await page.keyboard.press('Control+A');
     await page.keyboard.press('Delete');
-    await page.keyboard.insertText(html);
-    return;
+    await page.keyboard.insertText(merged);
+    return existing.trim();
   }
   // 폴백: 본문 영역에 직접 입력
   const body = page.locator('.tox-edit-area iframe, [contenteditable="true"]').first();
   await body.click();
   await page.keyboard.insertText(html);
+  return '';
 }
 
 async function fillTags(page, sel, tags) {
@@ -166,9 +281,9 @@ async function fillTags(page, sel, tags) {
   }
 }
 
-async function publish(page, sel, config) {
-  if (!config.tistory.publish) {
-    console.log('ℹ️  config.tistory.publish=false → 발행하지 않고 임시 상태로 둡니다.');
+async function publish(page, sel, blog) {
+  if (!blog.publish) {
+    console.log('ℹ️  publish=false → 발행하지 않고 임시 상태로 둡니다.');
     return null;
   }
 
@@ -180,18 +295,26 @@ async function publish(page, sel, config) {
   }
   await page.waitForTimeout(800);
 
-  // 공개/비공개 옵션 (config: public/private)
-  if (config.tistory.publishVisibility === 'public') {
+  // 공개/비공개 옵션 (blog: public/private)
+  if (blog.publishVisibility === 'public') {
     await page.getByText('공개', { exact: true }).first().click({ timeout: 3000 }).catch(() => {});
   }
 
   // 최종 발행 버튼
   await page.getByRole('button', { name: new RegExp(sel.publishConfirmText + '|발행') }).last().click({ timeout: 8000 });
 
-  // 발행 후 글 페이지로 이동하길 잠시 대기
-  await page.waitForTimeout(4000);
+  // 발행이 끝나면 글 본문 페이지(.../<글번호> 또는 .../entry/...)로 이동한다.
+  // 그 이동을 명시적으로 기다려야 실제 글 URL 을 잡을 수 있다(내부 링크·state 기록용).
+  // 기다리지 못하면(셀렉터/리다이렉트 변화 등) 기존처럼 4초 후 현재 URL 로 폴백한다.
+  const postUrlRe = new RegExp(`${blog.blogName}\\.tistory\\.com/(?:entry/|\\d)`, 'i');
+  try {
+    await page.waitForURL(postUrlRe, { timeout: 10000 });
+  } catch {
+    await page.waitForTimeout(4000);
+  }
   const finalUrl = page.url();
-  return finalUrl.includes('/manage/') ? null : finalUrl;
+  // 관리 화면(/manage/)에 머물러 있으면 실제 글 URL 을 못 잡은 것 → null.
+  return postUrlRe.test(finalUrl) ? finalUrl : null;
 }
 
 async function dumpFailure(page, err) {

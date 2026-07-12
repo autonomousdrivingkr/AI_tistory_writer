@@ -4,16 +4,20 @@
 평소엔 내 PC가 발행하고, **PC가 꺼져 있으면 GitHub Actions가 대신** 발행합니다(이중 안전망).
 
 ```
-[topics.json 주제 큐] → [AI가 글 작성] → [Playwright로 티스토리 발행] → [매일 06:00 / 22:00]
+[블로그별 주제 큐 topics.<블로그>.json] → [AI가 글 작성] → [Playwright로 티스토리 발행] → [매일 06:00 / 22:00]
 ```
+
+> 여러 티스토리 블로그를 한 봇으로 운영할 수 있습니다. 블로그마다 주제 큐(`topics.<id>.json`)를 따로 두고,
+> 터미널에서 직접 실행하면 어느 블로그(또는 전체)에 발행할지 고를 수 있습니다. 자동 발행(스케줄러·GitHub)은
+> 기본 블로그(`config.tistory.defaultBlog`) 한 곳만 발행합니다.
 
 ---
 
 ## 동작 방식
 
-- **매일 아침 6시 / 저녁 10시**, `topics.json` 에서 다음 주제를 꺼내 AI가 글을 작성하고 발행합니다.
+- **매일 아침 6시 / 저녁 10시**, 블로그별 주제 큐(`topics.<id>.json`)에서 다음 주제를 꺼내 AI가 글을 작성하고 발행합니다.
 - 티스토리 공식 API는 사실상 종료되어, **브라우저 자동화(Playwright)** 로 발행합니다. 최초 1회만 직접 로그인해 세션을 저장합니다.
-- **중복 방지**: PC와 GitHub가 둘 다 돌아도 `state.json` 의 "오늘 이 시간대 발행됨" 기록으로 한 번만 발행됩니다. GitHub는 PC보다 15분 늦게 실행되어 PC에 우선권을 줍니다.
+- **중복 방지**: PC와 GitHub가 둘 다 돌아도 `state.json` 의 "오늘 이 시간대·이 블로그 발행됨" 기록으로 블로그별 한 번만 발행됩니다. GitHub는 PC보다 15분 늦게 실행되어 PC에 우선권을 줍니다.
 
 ---
 
@@ -42,8 +46,24 @@ Copy-Item .env.example .env
 > 키가 없으면 그냥 사진 없이 글만 발행됩니다(에러 아님). 끄려면 `config.json` 의 `images.enabled` 를 `false` 로.
 
 ### 3. 내 블로그 주소 설정
-`config.json` 의 `tistory.blogName` 을 **본인 블로그 주소**로 바꿉니다.
+`config.json` 의 `tistory.blogs` 배열에 운영할 블로그를 적습니다. `blogName` 은 블로그 주소 앞부분,
+`topicsFile` 은 그 블로그의 주제 큐 파일 이름입니다.
 예: 블로그가 `https://myblog.tistory.com` 이면 → `"blogName": "myblog"`
+```json
+"tistory": {
+  "publish": true,
+  "publishVisibility": "public",
+  "defaultBlog": "myblog",
+  "blogs": [
+    { "id": "myblog", "label": "메인 블로그", "blogName": "myblog", "topicsFile": "topics.myblog.json" }
+  ]
+}
+```
+- 블로그를 더 추가하려면 `blogs` 에 항목을 늘리고, 각자 `topicsFile` 을 만들면 됩니다.
+- `defaultBlog` 는 **자동 발행(스케줄러·GitHub)에서 발행할 블로그 id** 입니다. (없으면 첫 번째)
+- 블로그마다 발행 여부·공개범위를 따로 두고 싶으면 `blogs[].publish` / `blogs[].publishVisibility` 로 덮어쓸 수 있습니다.
+- **여러 블로그가 같은 티스토리 계정**이면 세션 파일(`storage_state.json`) 하나를 공유합니다.
+  다른 계정이면 `blogs[].storageStatePath` 로 블로그별 세션 파일을 지정하세요.
 
 ### 4. 티스토리 로그인 세션 저장 (최초 1회)
 ```powershell
@@ -97,7 +117,8 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-task-scheduler.ps1
 
 ## 주제 추가하기
 
-`topics.json` 에 항목을 추가하면 됩니다. `status` 가 `pending` 인 것부터 순서대로 발행됩니다.
+발행할 **블로그의 주제 파일**(`topics.<id>.json`)에 항목을 추가하면 됩니다.
+`status` 가 `pending` 인 것부터 순서대로 발행됩니다.
 ```json
 {
   "topic": "글로 쓸 주제",
@@ -105,6 +126,8 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-task-scheduler.ps1
   "status": "pending"
 }
 ```
+> 예: `captainzone` 블로그는 `topics.captainzone.json`, `marvel-ironman` 블로그는 `topics.marvel-ironman.json`.
+> 파일 이름은 `config.json` 의 각 블로그 `topicsFile` 과 일치해야 합니다.
 
 ---
 
@@ -118,7 +141,13 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-task-scheduler.ps1
 | `npm run post:morning` / `:evening` | 특정 슬롯으로 강제 발행 |
 | `npm run export-session` | 세션을 base64로 출력(GitHub secret용) |
 
-추가 플래그: `--headful`(브라우저 표시), `--force`(중복 방지 무시), `--dry-run`(발행 안 함)
+> 터미널에서 직접 실행하면 **어느 블로그(또는 전체)에 발행할지**, 그리고 **어떤 주제로 쓸지**를 골라 묻습니다.
+> CI·스케줄러처럼 입력이 없는 환경에서는 묻지 않고 기본 블로그·첫 대기 주제로 자동 진행합니다.
+
+추가 플래그:
+- `--blog <id>`: 특정 블로그만 발행(자동 실행에서도 콕 집어 지정)
+- `--headful`: 브라우저 표시 / `--force`: 중복 방지 무시 / `--dry-run`: 발행 안 함(미리보기만)
+- `--no-publish`: 에디터 입력까지만 하고 최종 발행은 건너뜀(에디터 동작 확인용) / `--yes`: 대화형 질문 건너뛰기
 
 ---
 
@@ -126,9 +155,10 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-task-scheduler.ps1
 
 - `llm.provider`: `gemini`(무료, 기본) 또는 `claude`(유료). **이 한 줄만 바꾸면 전환됩니다.**
 - `llm.models`: provider 별 모델. 기본 `gemini: gemini-2.0-flash`, `claude: claude-sonnet-4-6`. 더 좋은 Claude 품질은 `claude-opus-4-8`.
-- `tistory.blogName`: 블로그 주소 앞부분.
-- `tistory.publish`: `false` 로 두면 발행 직전까지만 하고 멈춤(테스트용).
-- `tistory.publishVisibility`: `public`(공개) / `private`(비공개).
+- `tistory.blogs`: 운영할 블로그 목록. 각 항목 `id`(식별자) · `label`(표시명) · `blogName`(주소 앞부분) · `topicsFile`(주제 큐 파일).
+- `tistory.defaultBlog`: 자동 발행(스케줄러·GitHub)에서 발행할 블로그 `id`(없으면 첫 번째).
+- `tistory.publish`: `false` 로 두면 발행 직전까지만 하고 멈춤(테스트용). 블로그별로 `blogs[].publish` 로 덮어쓸 수 있음.
+- `tistory.publishVisibility`: `public`(공개) / `private`(비공개). 블로그별로 `blogs[].publishVisibility` 로 덮어쓸 수 있음.
 - `images.enabled`: `true` 면 본문에 관련 사진을 자동 삽입(무료 `PEXELS_API_KEY` 필요).
 - `images.perArticle`: 글 1편에 넣을 사진 수(기본 3). `images.orientation`: `landscape`/`portrait`/`square`.
 - `schedule.slots`: 아침/저녁 시간대 범위(슬롯 자동 판별용).

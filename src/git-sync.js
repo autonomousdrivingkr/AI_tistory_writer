@@ -19,11 +19,11 @@ export function pullLatest() {
 }
 
 /**
- * 발행 후 state.json / topics.json 변경분을 커밋·푸시한다.
+ * 발행 후 state.json / topics.*.json(블로그별 주제 파일) 변경분을 커밋·푸시한다.
  */
 export function pushState(message) {
   try {
-    run('git add state.json topics.json');
+    run('git add state.json topics.*.json');
     // 변경사항이 없으면 커밋 생략
     try {
       run('git diff --staged --quiet');

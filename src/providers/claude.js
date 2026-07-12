@@ -10,7 +10,7 @@ const ARTICLE_TOOL = {
     properties: {
       title: {
         type: 'string',
-        description: '클릭을 부르면서 검색 키워드를 담은 한국어 제목. 30~45자 권장.'
+        description: '클릭을 부르는 한국어 제목. 핵심 검색 키워드를 제목 앞부분에 배치. 30~45자 권장.'
       },
       tags: {
         type: 'array',
@@ -35,7 +35,7 @@ const ARTICLE_TOOL = {
   }
 };
 
-export async function generate({ topic, instructions, config }) {
+export async function generate({ topic, instructions, config, research }) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY 가 설정되지 않았습니다. .env 를 확인하세요.');
 
@@ -48,7 +48,7 @@ export async function generate({ topic, instructions, config }) {
     system: SYSTEM_PROMPT,
     tools: [ARTICLE_TOOL],
     tool_choice: { type: 'tool', name: 'submit_article' },
-    messages: [{ role: 'user', content: buildUserPrompt({ topic, instructions }) }]
+    messages: [{ role: 'user', content: buildUserPrompt({ topic, instructions, research }) }]
   });
 
   const toolUse = resp.content.find((b) => b.type === 'tool_use');

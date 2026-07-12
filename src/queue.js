@@ -2,7 +2,6 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROOT, localDate } from './config.js';
 
-const TOPICS_PATH = join(ROOT, 'topics.json');
 const STATE_PATH = join(ROOT, 'state.json');
 
 function readJson(path, fallback) {
@@ -11,6 +10,11 @@ function readJson(path, fallback) {
   } catch {
     return fallback;
   }
+}
+
+/** 주제 파일(블로그별)의 절대 경로 */
+function topicsPath(topicsFile) {
+  return join(ROOT, topicsFile || 'topics.json');
 }
 
 /** 현재 시각이 어느 슬롯(morning/evening)에 해당하는지 판별. 범위 밖이면 null */
@@ -22,15 +26,19 @@ export function currentSlot(config, now = new Date()) {
   return null;
 }
 
-/** 슬롯의 고유 키: 2026-06-14-morning */
-export function slotKey(slot, now = new Date()) {
-  return `${localDate(now)}-${slot}`;
+/**
+ * 슬롯의 고유 키: 2026-06-14-morning-captainzone
+ * blogId 를 붙여 블로그별로 중복방지 기록을 따로 둔다(같은 슬롯에 블로그마다 1편씩 가능).
+ */
+export function slotKey(slot, now = new Date(), blogId) {
+  const base = `${localDate(now)}-${slot}`;
+  return blogId ? `${base}-${blogId}` : base;
 }
 
-/** 해당 슬롯이 이미 발행되었는지 (PC/GitHub 중복 방지의 핵심) */
-export function isPublished(slot, now = new Date()) {
+/** 해당 블로그·슬롯이 이미 발행되었는지 (PC/GitHub 중복 방지의 핵심) */
+export function isPublished(slot, now = new Date(), blogId) {
   const state = readJson(STATE_PATH, { published: [] });
-  const key = slotKey(slot, now);
+  const key = slotKey(slot, now, blogId);
   return state.published.some((p) => p.key === key);
 }
 
@@ -43,31 +51,32 @@ export function recordPublished(entry) {
   writeFileSync(STATE_PATH, JSON.stringify(state, null, 2) + '\n');
 }
 
-/** 다음 발행할 pending 주제 1건 반환 (없으면 null) */
-export function pickNextTopic() {
-  const topics = readJson(TOPICS_PATH, []);
+/** 해당 블로그의 다음 발행할 pending 주제 1건 반환 (없으면 null) */
+export function pickNextTopic(topicsFile) {
+  const topics = readJson(topicsPath(topicsFile), []);
   return topics.find((t) => t.status === 'pending') || null;
 }
 
-/** pending 주제 전체 목록 반환 (테스트 발행 시 주제 선택용) */
-export function listPendingTopics() {
-  const topics = readJson(TOPICS_PATH, []);
+/** 해당 블로그의 pending 주제 전체 목록 반환 (테스트 발행 시 주제 선택용) */
+export function listPendingTopics(topicsFile) {
+  const topics = readJson(topicsPath(topicsFile), []);
   return topics.filter((t) => t.status === 'pending');
 }
 
-/** 주제를 발행 완료로 표시 */
-export function markTopicDone(topic, meta = {}) {
-  const topics = readJson(TOPICS_PATH, []);
+/** 해당 블로그의 주제를 발행 완료로 표시 */
+export function markTopicDone(topic, topicsFile, meta = {}) {
+  const path = topicsPath(topicsFile);
+  const topics = readJson(path, []);
   const item = topics.find((t) => t.topic === topic && t.status === 'pending');
   if (item) {
     item.status = 'done';
     item.publishedAt = new Date().toISOString();
     if (meta.url) item.url = meta.url;
   }
-  writeFileSync(TOPICS_PATH, JSON.stringify(topics, null, 2) + '\n');
+  writeFileSync(path, JSON.stringify(topics, null, 2) + '\n');
 }
 
-export function pendingCount() {
-  const topics = readJson(TOPICS_PATH, []);
+export function pendingCount(topicsFile) {
+  const topics = readJson(topicsPath(topicsFile), []);
   return topics.filter((t) => t.status === 'pending').length;
 }
