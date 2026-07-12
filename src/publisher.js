@@ -72,6 +72,13 @@ export async function publishToTistory(article, config, opts = {}) {
     //   업로드가 에디터에 안 붙으면 조용히 썸네일만 사라지므로, 매 발행마다 명확히 로그로 남긴다.
     if (opts.thumbnailPath) verifyThumbnailMacro(preservedSource);
 
+    // 2.6) HTML 모드 입력을 실제 발행 문서(기본모드/WYSIWYG)에 반영.
+    //   티스토리는 HTML 모드의 CodeMirror 를 소스 "보기/편집" 뷰로만 쓰고, 실제 발행은
+    //   기본모드 문서 기준이다. 이 전환 없이 바로 발행하면 HTML 모드에서 입력한 본문이
+    //   통째로 사라지고 직전 기본모드 상태(대표이미지만)로 발행된다 — 실사고로 확인됨.
+    await applyHtmlToVisualMode(page, sel);
+    await verifyBodyApplied(page, article.html);
+
     // 3) 태그 입력
     await fillTags(page, sel, article.tags || []);
 
@@ -263,6 +270,50 @@ async function typeHtmlBody(page, sel, html) {
   await body.click();
   await page.keyboard.insertText(html);
   return '';
+}
+
+/**
+ * HTML 소스 모드(CodeMirror)에서 편집한 내용을 기본모드(WYSIWYG)로 되돌려 실제 발행
+ * 문서에 반영한다. "HTML" 드롭다운(HTML 모드일 때 툴바에 나타남) → "기본모드" 순서로 클릭.
+ * 모드 전환 confirm(native dialog)이 뜨므로 accept 핸들러를 걸어둔다.
+ */
+async function applyHtmlToVisualMode(page, sel) {
+  const acceptDialog = (d) => d.accept().catch(() => {});
+  page.on('dialog', acceptDialog);
+  try {
+    await page.getByRole('button', { name: /^HTML/ }).first().click({ timeout: 5000 });
+    await page.locator(sel.modeVisualItem || '#editor-mode-kakao-tistory:visible').first().click({ timeout: 5000 });
+    // 기본모드 에디터(iframe/contenteditable)가 실제로 다시 보일 때까지 대기 → 전환 완료 확인.
+    await page.locator('.tox-edit-area iframe, iframe, [contenteditable="true"]').first().waitFor({ state: 'visible', timeout: 8000 });
+  } catch (e) {
+    console.warn(`⚠️  기본모드 복귀 실패 — HTML 로 입력한 본문이 발행에 반영되지 않을 수 있습니다. (${e.message})`);
+  } finally {
+    page.off('dialog', acceptDialog);
+  }
+}
+
+/**
+ * 기본모드로 돌아온 뒤 에디터에 실제로 본문 텍스트가 반영됐는지 확인해 로그로 남긴다.
+ * (2026-07-11 사고: 이 확인이 없어 본문이 통째로 빠진 채 발행된 걸 뒤늦게 알아챔.)
+ * 원본 글자 수의 절반에도 못 미치면 반영 실패로 보고 명확히 경고한다.
+ */
+async function verifyBodyApplied(page, expectedHtml) {
+  const visibleLength = await page.evaluate(() => {
+    const iframe = document.querySelector('.tox-edit-area iframe, iframe');
+    if (iframe && iframe.contentDocument) return iframe.contentDocument.body?.innerText?.length || 0;
+    const ce = document.querySelector('[contenteditable="true"]');
+    return ce ? ce.innerText.length : 0;
+  }).catch(() => 0);
+
+  const expectedTextLength = String(expectedHtml || '').replace(/<[^>]+>/g, '').length;
+  if (expectedTextLength && visibleLength < expectedTextLength * 0.5) {
+    console.warn(
+      `   ⚠️  본문 반영 확인 실패 — 에디터에 보이는 글자 수(${visibleLength})가 원본(약 ${expectedTextLength}자)보다 훨씬 적습니다.\n` +
+      '      → 이대로 발행하면 본문이 비어있을 수 있습니다. --headful --no-publish 로 직접 확인하세요.'
+    );
+  } else {
+    console.log(`   ✅ 본문이 에디터에 정상 반영됨 (${visibleLength}자 확인).`);
+  }
 }
 
 async function fillTags(page, sel, tags) {

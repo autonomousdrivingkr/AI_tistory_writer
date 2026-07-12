@@ -66,6 +66,7 @@
     "tagInput": "#tagText",
     "modeButton": "#editor-mode-layer-btn-open",
     "modeHtml": "#editor-mode-html",
+    "modeVisualItem": "#editor-mode-kakao-tistory:visible",
     "codeMirror": ".CodeMirror",
     "imageFileInput": "input[type=\"file\"]",
     "imageButton": "[id*=\"image\"], [aria-label*=\"사진\"], [class*=\"btn-image\"]",
