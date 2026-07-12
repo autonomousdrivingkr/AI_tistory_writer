@@ -1,0 +1,113 @@
+name: 이슈로 주제 추가
+
+# "새 주제 추가" 이슈 폼(.github/ISSUE_TEMPLATE/new-topic.yml)으로 등록된 이슈를 읽어
+# 해당 블로그의 topics.*.json 에 pending 주제로 자동 추가한다.
+# 폰(GitHub 앱)에서 이슈만 등록하면 JSON을 직접 편집할 필요가 없다.
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: add-topic-from-issue
+
+jobs:
+  add-topic:
+    if: contains(github.event.issue.labels.*.name, 'new-topic')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 이슈 파싱 → topics 파일에 추가
+        id: add
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // 저장소 소유자만 사용 가능 — 공개 저장소라 라벨은 누구나 이 폼으로 붙일 수 있으므로
+            // 실제 큐에 쓰기 전에 작성자를 반드시 확인한다.
+            const OWNER = 'autonomousdrivingkr';
+            if (context.payload.issue.user.login !== OWNER) {
+              core.setOutput('reason', 'unauthorized');
+              core.setFailed(`허용되지 않은 사용자: ${context.payload.issue.user.login}`);
+              return;
+            }
+
+            const body = context.payload.issue.body || '';
+            function extract(label) {
+              const re = new RegExp(`### ${label}\\s*\\n+([\\s\\S]*?)(?:\\n### |$)`);
+              const m = body.match(re);
+              const v = m ? m[1].trim() : '';
+              return /^_No response_$/i.test(v) ? '' : v;
+            }
+
+            const blogRaw = extract('블로그');
+            const topic = extract('주제');
+            const instructions = extract('세부 지시사항 \\(선택\\)');
+
+            const blogMap = {
+              'captainzone (메인 블로그)': 'topics.captainzone.json',
+              'marvel-ironman (마블 아이언맨)': 'topics.marvel-ironman.json'
+            };
+            const topicsFile = blogMap[blogRaw];
+
+            if (!topicsFile || !topic) {
+              core.setOutput('reason', 'parse_error');
+              core.setFailed(`이슈 파싱 실패 — blog:"${blogRaw}" topic:"${topic}"`);
+              return;
+            }
+
+            const topics = JSON.parse(fs.readFileSync(topicsFile, 'utf-8'));
+            topics.push({ topic, instructions, status: 'pending' });
+            fs.writeFileSync(topicsFile, JSON.stringify(topics, null, 2) + '\n');
+
+            core.setOutput('topics_file', topicsFile);
+            core.setOutput('topic', topic);
+
+      - name: 커밋 & 푸시
+        if: success()
+        run: |
+          git config user.name "tistory-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add "${{ steps.add.outputs.topics_file }}"
+          git commit -m "chore: 이슈로 주제 추가 - ${{ steps.add.outputs.topic }} [skip ci]"
+          git push
+
+      - name: 등록 완료 안내 후 이슈 닫기
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `✅ 큐에 등록됐습니다: **${{ steps.add.outputs.topic }}** → \`${{ steps.add.outputs.topics_file }}\`\n\n다음 자동 발행 슬롯(아침/저녁)에서 순서대로 처리됩니다.`
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });
+
+      - name: 실패 안내
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const reason = "${{ steps.add.outputs.reason }}";
+            const body = reason === 'unauthorized'
+              ? '🔒 이 자동화는 저장소 소유자만 사용할 수 있습니다.'
+              : '⚠️ 이슈 내용을 자동으로 읽지 못했습니다. 폼 형식 그대로 다시 등록해 주세요.';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });

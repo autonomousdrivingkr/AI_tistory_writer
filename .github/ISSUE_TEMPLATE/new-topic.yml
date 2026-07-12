@@ -1,0 +1,32 @@
+name: 새 주제 추가
+description: 자동 발행 큐에 새 주제를 등록합니다 (폰에서 이 폼만 채우면 topics 파일에 자동 반영됩니다)
+title: "[주제] "
+labels: ["new-topic"]
+body:
+  - type: dropdown
+    id: blog
+    attributes:
+      label: 블로그
+      description: 어느 블로그 큐에 등록할까요?
+      options:
+        - "captainzone (메인 블로그)"
+        - "marvel-ironman (마블 아이언맨)"
+      default: 0
+    validations:
+      required: true
+  - type: input
+    id: topic
+    attributes:
+      label: 주제
+      description: 글 주제를 짧게 적어주세요.
+      placeholder: 예) 곤지암CC 근처 맛집
+    validations:
+      required: true
+  - type: textarea
+    id: instructions
+    attributes:
+      label: 세부 지시사항 (선택)
+      description: 톤·분량·포함할 내용 등. 비워두면 기본 스타일로 작성됩니다.
+      placeholder: 예) 라운딩 전후 맛집을 나눠서 소개, 메뉴·가격대 포함, 친근한 말투로.
+    validations:
+      required: false
