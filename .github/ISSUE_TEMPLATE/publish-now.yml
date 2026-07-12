@@ -1,0 +1,21 @@
+name: 지금 발행
+description: 아침/저녁 시간대를 기다리지 않고, 대기 큐의 다음 주제를 지금 바로 티스토리에 발행합니다.
+title: "[발행] 지금 발행 요청"
+labels: ["publish-now"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        이 이슈를 등록하면 선택한 블로그의 대기 큐에서 다음 주제 1건을 즉시 생성·발행합니다.
+        (오늘 이미 같은 방식으로 발행했다면 중복 방지로 건너뛸 수 있어요.)
+  - type: dropdown
+    id: blog
+    attributes:
+      label: 블로그
+      description: 어느 블로그에 지금 발행할까요?
+      options:
+        - "captainzone (메인 블로그)"
+        - "marvel-ironman (마블 아이언맨)"
+      default: 0
+    validations:
+      required: true

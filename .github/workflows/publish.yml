@@ -9,6 +9,17 @@ on:
     - cron: '15 21 * * *'   # 06:15 KST (아침)  = 21:15 UTC 전날
     - cron: '15 13 * * *'   # 22:15 KST (저녁)  = 13:15 UTC
   workflow_dispatch:        # 수동 실행 버튼
+    inputs:
+      slot:
+        description: '발행 슬롯 (auto=아침/저녁 시간대에만, manual=시간대 상관없이 즉시)'
+        required: false
+        default: 'auto'
+        type: choice
+        options: ['auto', 'manual']
+      blog:
+        description: '블로그 id (비우면 기본 블로그)'
+        required: false
+        type: string
 
 concurrency:
   group: tistory-publish
@@ -47,7 +58,14 @@ jobs:
 
       - name: 발행 실행
         # 자동 발행은 기본 블로그(config.tistory.defaultBlog) 한 곳만. (TTY 없음 → 비대화형)
-        run: node src/main.js --slot auto
+        # workflow_dispatch 로 수동 실행 시 slot=manual 을 주면 아침/저녁 시간대가 아니어도 즉시 발행한다.
+        env:
+          SLOT_INPUT: ${{ inputs.slot }}
+          BLOG_INPUT: ${{ inputs.blog }}
+        run: |
+          ARGS="--slot ${SLOT_INPUT:-auto}"
+          if [ -n "$BLOG_INPUT" ]; then ARGS="$ARGS --blog $BLOG_INPUT"; fi
+          node src/main.js $ARGS
 
       - name: 상태 커밋
         run: |

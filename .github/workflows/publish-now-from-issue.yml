@@ -1,0 +1,139 @@
+name: 이슈로 즉시 발행
+
+# "지금 발행" 이슈 폼(.github/ISSUE_TEMPLATE/publish-now.yml)으로 등록된 이슈를 보고
+# 아침/저녁 시간대를 기다리지 않고 대기 큐의 다음 주제를 바로 발행한다.
+# 폰(GitHub 앱)에서 이슈만 등록하면 결과가 댓글로 돌아온다.
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: tistory-publish
+  cancel-in-progress: false
+
+jobs:
+  publish-now:
+    if: contains(github.event.issue.labels.*.name, 'publish-now')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Asia/Seoul
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+      NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+      TISTORY_STORAGE_STATE: ${{ secrets.TISTORY_STORAGE_STATE }}
+    steps:
+      - name: 작성자 확인 · 이슈 파싱
+        id: auth
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // 공개 저장소라 라벨은 누구나 이 폼으로 붙일 수 있으므로, 실제로 발행하기 전에
+            // 작성자가 저장소 소유자인지 반드시 확인한다.
+            const OWNER = 'autonomousdrivingkr';
+            if (context.payload.issue.user.login !== OWNER) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,
+                body: '🔒 이 자동화는 저장소 소유자만 사용할 수 있습니다.'
+              });
+              core.setFailed('unauthorized');
+              return;
+            }
+
+            const body = context.payload.issue.body || '';
+            function extract(label) {
+              const re = new RegExp(`### ${label}\\s*\\n+([\\s\\S]*?)(?:\\n### |$)`);
+              const m = body.match(re);
+              return m ? m[1].trim() : '';
+            }
+            const blogRaw = extract('블로그');
+            const blogMap = {
+              'captainzone (메인 블로그)': 'captainzone',
+              'marvel-ironman (마블 아이언맨)': 'marvel-ironman'
+            };
+            const blogId = blogMap[blogRaw];
+            if (!blogId) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,
+                body: '⚠️ 블로그 선택을 읽지 못했습니다. 폼 형식 그대로 다시 등록해 주세요.'
+              });
+              core.setFailed('parse_error');
+              return;
+            }
+            core.setOutput('blog', blogId);
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 의존성 설치
+        run: npm install
+
+      - name: Playwright 브라우저 설치
+        run: npx playwright install --with-deps chromium
+
+      - name: 로그인 세션 복원
+        run: |
+          if [ -z "$TISTORY_STORAGE_STATE" ]; then
+            echo "TISTORY_STORAGE_STATE secret 이 없습니다."; exit 1
+          fi
+          echo "$TISTORY_STORAGE_STATE" | base64 -d > storage_state.json
+
+      - name: 발행 실행
+        id: publish
+        run: |
+          node src/main.js --slot manual --blog "${{ steps.auth.outputs.blog }}" --yes 2>&1 | tee publish.log
+          if grep -q "티스토리에 발행 중" publish.log; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "title<<EOF"
+            grep -m1 "제목:" publish.log | sed 's/^ *제목: *//'
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 상태 커밋
+        run: |
+          git config user.name "tistory-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add state.json topics.*.json
+          git diff --staged --quiet || git commit -m "chore: 이슈로 즉시 발행 [skip ci]"
+          git push
+
+      - name: 결과 안내
+        if: always() && steps.auth.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const jobFailed = "${{ job.status }}" === 'failure';
+            const published = "${{ steps.publish.outputs.published }}" === 'true';
+            const title = ${{ toJSON(steps.publish.outputs.title || '') }};
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            let body;
+            if (jobFailed) {
+              body = `❌ 발행 중 오류가 발생했습니다. [실행 로그](${runUrl})`;
+            } else if (published) {
+              body = `✅ 발행 완료!${title ? ` — **${title}**` : ''}`;
+            } else {
+              body = '📭 대기 중인 주제가 없거나 오늘 이미 발행되어 건너뛰었습니다. ("새 주제 추가"로 큐를 채우거나, 이미 발행됐다면 정상입니다.)';
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body
+            });
+            if (!jobFailed) {
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, state: 'closed'
+              });
+            }
