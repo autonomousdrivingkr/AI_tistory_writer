@@ -32,6 +32,8 @@ jobs:
       NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
       NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
       TISTORY_STORAGE_STATE: ${{ secrets.TISTORY_STORAGE_STATE }}
+      KAKAO_EMAIL: ${{ secrets.KAKAO_EMAIL }}
+      KAKAO_PASSWORD: ${{ secrets.KAKAO_PASSWORD }}
     steps:
       - name: 작성자 확인 · 이슈 파싱
         id: auth

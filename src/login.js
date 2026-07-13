@@ -2,11 +2,7 @@ import { chromium } from 'playwright';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { ROOT, loadConfig } from './config.js';
-
-// 카카오 자격증명은 .env 에서만 읽는다(코드/ config.json 에는 절대 두지 않는다).
-// .env 는 .gitignore 에 있으므로 커밋되지 않는다.
-const KAKAO_EMAIL = process.env.KAKAO_EMAIL || process.env.KAKAO_ID;
-const KAKAO_PASSWORD = process.env.KAKAO_PASSWORD || process.env.KAKAO_PW;
+import { KAKAO_EMAIL, KAKAO_PASSWORD, autoFillKakao } from './kakao-auth.js';
 
 /**
  * 최초 1회: 브라우저를 열어 카카오/티스토리 로그인 후 세션을 저장한다.
@@ -26,7 +22,14 @@ async function main() {
   await page.goto('https://www.tistory.com/auth/login');
 
   if (KAKAO_EMAIL && KAKAO_PASSWORD) {
-    await autoFillKakao(page);
+    const filled = await autoFillKakao(page);
+    if (filled) {
+      console.log('\n   ✓ 카카오 아이디/비밀번호를 자동 입력했습니다.');
+      console.log('   ⚠️  보안문자(캡차)·2단계 인증·새 기기 확인이 뜨면 직접 처리하세요.');
+      console.log('       모두 끝나 글쓰기/메인 화면이 보이면 Enter 를 누르세요.\n');
+    } else {
+      console.warn('\n   ⚠️ 자동 입력에 실패했습니다 — 브라우저에서 수동으로 로그인하세요.\n');
+    }
   } else {
     console.log('   브라우저가 열리면 평소처럼 카카오 로그인을 완료하세요.');
     console.log('   (.env 에 KAKAO_EMAIL/KAKAO_PASSWORD 를 넣으면 다음부턴 자동 입력됩니다.)\n');
@@ -55,55 +58,7 @@ async function main() {
   await browser.close();
 }
 
-/**
- * 티스토리 로그인 화면 → 카카오 로그인 폼으로 이동해 아이디/비번을 자동 입력한다.
- * 카카오는 셀렉터/캡차를 자주 바꾸므로 모두 best-effort 로 시도하고,
- * 실패하면 조용히 넘어가 사용자가 수동으로 마칠 수 있게 둔다.
- */
-async function autoFillKakao(page) {
-  try {
-    // 1) 티스토리 로그인 화면의 "카카오계정으로 로그인" 버튼/링크 → 카카오 로그인 폼으로 이동
-    const kakaoEntry = page
-      .getByRole('link', { name: /카카오/ })
-      .or(page.getByRole('button', { name: /카카오/ }));
-    await kakaoEntry.first().click({ timeout: 8000 }).catch(() => {});
-
-    // 2) 카카오 로그인 폼(아이디/비번)이 뜰 때까지 대기
-    const idInput = page
-      .locator('input[name="loginId"], input[name="email"], #loginId--1, #id_email_2')
-      .first();
-    await idInput.waitFor({ state: 'visible', timeout: 15000 });
-    await idInput.fill(KAKAO_EMAIL);
-
-    const pwInput = page
-      .locator('input[name="password"], input[type="password"], #password--2')
-      .first();
-    await pwInput.fill(KAKAO_PASSWORD);
-
-    // 3) "로그인 상태 유지" 체크 → 세션이 더 오래 유지돼 재로그인 빈도가 준다.
-    await page
-      .getByText('로그인 상태 유지', { exact: false })
-      .first()
-      .click({ timeout: 2000 })
-      .catch(() => {});
-
-    // 4) 로그인 버튼(없으면 Enter 로 제출)
-    await page
-      .getByRole('button', { name: /^로그인$/ })
-      .first()
-      .click({ timeout: 5000 })
-      .catch(() => pwInput.press('Enter').catch(() => {}));
-
-    console.log('\n   ✓ 카카오 아이디/비밀번호를 자동 입력했습니다.');
-    console.log('   ⚠️  보안문자(캡차)·2단계 인증·새 기기 확인이 뜨면 직접 처리하세요.');
-    console.log('       모두 끝나 글쓰기/메인 화면이 보이면 Enter 를 누르세요.\n');
-  } catch (e) {
-    console.warn('\n   ⚠️ 자동 입력에 실패했습니다 — 브라우저에서 수동으로 로그인하세요.');
-    console.warn(`      (원인: ${e.message})\n`);
-  }
-}
-
-/** 티스토리 세션 쿠키(TSSESSION)가 생길 때까지 3초 간격으로 확인한다. */
+/** 티스토리 세션 쿠키(TSSESSION)가 생길 때까지 3초 간격으로 확인한다(Enter 입력과 경쟁). */
 async function waitForLogin(context, abort) {
   while (!abort.done) {
     const cookies = await context.cookies('https://www.tistory.com').catch(() => []);

@@ -35,7 +35,11 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}        # 무료(gemini) provider 용
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}  # 유료(claude) provider 용
       PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}        # 본문 사진(선택) — 없으면 사진 없이 발행
+      NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}      # 리서치 그라운딩(지역·실존 업체) 및 위치 링크용
+      NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
       TISTORY_STORAGE_STATE: ${{ secrets.TISTORY_STORAGE_STATE }}
+      KAKAO_EMAIL: ${{ secrets.KAKAO_EMAIL }}              # 세션 만료 시 자동 재로그인 폴백용
+      KAKAO_PASSWORD: ${{ secrets.KAKAO_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 

@@ -2,6 +2,8 @@ import { chromium } from 'playwright';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROOT, getBlogs, resolveBlog } from './config.js';
+import { KAKAO_EMAIL, KAKAO_PASSWORD, autoFillKakao, waitForSessionCookie } from './kakao-auth.js';
+import { syncSessionSecret } from './git-sync.js';
 
 const LOGS_DIR = join(ROOT, 'logs');
 
@@ -44,8 +46,8 @@ export async function publishToTistory(article, config, opts = {}) {
 
     // 세션이 만료되면 글쓰기 페이지 대신 로그인 화면(카카오 로그인)으로 튕긴다.
     // 이 경우 제목 셀렉터를 20초 기다리다 의미 불명한 타임아웃으로 끝나므로,
-    // 여기서 먼저 감지해 무엇을 해야 하는지 분명한 에러로 빠르게 실패시킨다.
-    await ensureLoggedIn(page);
+    // 여기서 먼저 감지해 자동 재로그인을 시도하고, 그래도 안 되면 분명한 에러로 빠르게 실패시킨다.
+    await ensureLoggedIn(page, { context, storagePath, url });
 
     // "작성 중인 글이 있습니다" 같은 임시저장 팝업이 뜨면 닫는다(새 글로 시작).
     await dismissDraftDialog(page, sel);
@@ -96,21 +98,68 @@ export async function publishToTistory(article, config, opts = {}) {
   }
 }
 
-async function ensureLoggedIn(page) {
-  // 1) URL 기준: 글쓰기 페이지가 아니라 티스토리/카카오 로그인 페이지로 리다이렉트됐는가?
+/** 글쓰기 페이지가 아니라 티스토리/카카오 로그인 화면에 있는지 판별한다. */
+async function isOnLoginScreen(page) {
   const cur = page.url();
-  const onLoginUrl = /\/auth\/login|accounts\.kakao\.com|kauth\.kakao\.com/.test(cur);
-
-  // 2) 화면 기준: "카카오계정으로 로그인" 버튼/문구가 보이는가? (URL 이 모호한 경우 대비)
+  if (/\/auth\/login|accounts\.kakao\.com|kauth\.kakao\.com/.test(cur)) return true;
   const kakaoBtn = page.getByText('카카오계정으로 로그인', { exact: false });
-  const onLoginScreen = await kakaoBtn.first().isVisible({ timeout: 2000 }).catch(() => false);
+  return kakaoBtn.first().isVisible({ timeout: 2000 }).catch(() => false);
+}
 
-  if (onLoginUrl || onLoginScreen) {
+/**
+ * 세션이 만료돼 로그인 화면으로 튕겼으면, .env 의 카카오 자격증명으로 자동 재로그인을
+ * 한 번 시도한다(사람 개입 없이). 성공하면 세션을 새로 저장하고(+ 가능하면 GitHub Secret도
+ * 동기화) 글쓰기 페이지로 다시 이동해 발행을 이어간다. 실패하면(자격증명 없음·캡차 등)
+ * 무엇을 해야 하는지 분명한 에러로 빠르게 실패시킨다.
+ */
+async function ensureLoggedIn(page, { context, storagePath, url }) {
+  if (!(await isOnLoginScreen(page))) return;
+
+  if (!KAKAO_EMAIL || !KAKAO_PASSWORD) {
     throw new Error(
       '티스토리 로그인 세션이 만료되었습니다 (로그인 화면으로 리다이렉트됨).\n' +
-      '  → 해결: "npm run login" 을 실행해 카카오 로그인을 다시 마치고 세션을 새로 저장하세요.\n' +
+      '  → .env 에 KAKAO_EMAIL/KAKAO_PASSWORD 가 없어 자동 재로그인을 시도할 수 없습니다.\n' +
+      '  → 해결: "npm run login" 을 실행해 카카오 로그인을 다시 마치고 세션을 새로 저장하세요.'
+    );
+  }
+
+  console.warn('⚠️  세션이 만료된 것 같습니다 — .env 자격증명으로 자동 재로그인을 시도합니다...');
+  await autoFillKakao(page);
+  const ok = await waitForSessionCookie(context, 30000);
+
+  if (!ok) {
+    throw new Error(
+      '티스토리 로그인 세션이 만료되었고, 자동 재로그인도 실패했습니다\n' +
+      '  (보안문자·2단계 인증·새 기기 확인 등으로 막혔을 수 있습니다).\n' +
+      '  → 해결: "npm run login" 으로 직접 로그인해 세션을 새로 저장하세요.\n' +
       '  → GitHub Actions 도 쓴다면 "npm run export-session" 결과로 TISTORY_STORAGE_STATE 시크릿도 갱신하세요.'
     );
+  }
+
+  console.log('   ✓ 자동 재로그인 성공 — 세션을 새로 저장하고 발행을 계속합니다.');
+
+  // 로그인 직후에는 카카오→티스토리 콜백 리다이렉트가 아직 진행 중일 수 있다.
+  // 이 상태에서 바로 goto() 하면 진행 중이던 네비게이션과 충돌해 ERR_ABORTED 로 실패하므로,
+  // 현재 리다이렉트 체인이 끝나기를 기다린 뒤(best-effort) 재이동한다.
+  await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 1500));
+
+  await context.storageState({ path: storagePath });
+  if (!process.env.CI) syncSessionSecret(storagePath);
+
+  await retryGoto(page, url);
+  if (await isOnLoginScreen(page)) {
+    throw new Error('재로그인 후에도 글쓰기 페이지에 접근할 수 없습니다.');
+  }
+}
+
+/** ERR_ABORTED 등 일시적 네비게이션 충돌을 한 번 재시도한다. */
+async function retryGoto(page, url) {
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+  } catch {
+    await new Promise((r) => setTimeout(r, 1500));
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
   }
 }
 

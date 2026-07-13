@@ -1,4 +1,5 @@
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { ROOT } from './config.js';
 
 function run(cmd) {
@@ -42,4 +43,29 @@ export function pushState(message) {
 
 function firstLine(e) {
   return String(e.stderr || e.message || e).split('\n')[0];
+}
+
+/**
+ * (best-effort) 새로 로그인해 저장한 세션을 GitHub Actions 시크릿(TISTORY_STORAGE_STATE)에도
+ * 동기화한다. 로컬 PC가 자동 재로그인으로 세션을 새로 저장할 때마다 실행되며,
+ * 이 PC의 세션이 클라우드 백업 워크플로우까지 늘 최신 상태를 쓰게 해준다.
+ * gh CLI 가 없거나 로그인 안 돼 있으면 조용히 건너뛴다(발행 자체를 막지 않는다).
+ */
+export function syncSessionSecret(storagePath) {
+  try {
+    const origin = run('git config --get remote.origin.url');
+    const m = origin.match(/github\.com[:/]([^/]+)\/([^/.]+?)(?:\.git)?$/);
+    if (!m) return;
+    const repo = `${m[1]}/${m[2]}`;
+
+    const b64 = readFileSync(storagePath).toString('base64');
+    execFileSync('gh', ['secret', 'set', 'TISTORY_STORAGE_STATE', '--repo', repo], {
+      cwd: ROOT,
+      input: b64,
+      stdio: ['pipe', 'ignore', 'ignore']
+    });
+    console.log('🔁 새 세션을 GitHub Secret(TISTORY_STORAGE_STATE)에도 동기화했습니다.');
+  } catch {
+    // gh 미설치·미인증 등은 부가 기능 실패일 뿐이므로 조용히 넘어간다.
+  }
 }
