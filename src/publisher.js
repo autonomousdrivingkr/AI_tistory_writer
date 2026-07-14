@@ -124,6 +124,9 @@ async function ensureLoggedIn(page, { context, storagePath, url }) {
   }
 
   console.warn('⚠️  세션이 만료된 것 같습니다 — .env 자격증명으로 자동 재로그인을 시도합니다...');
+
+  // 깨끗한 로그인 흐름으로 다시 시작한다(튕겨나온 페이지에서 이어 하는 것보다 안정적).
+  await retryGoto(page, 'https://www.tistory.com/auth/login');
   await autoFillKakao(page);
   const ok = await waitForSessionCookie(context, 30000);
 
@@ -136,21 +139,36 @@ async function ensureLoggedIn(page, { context, storagePath, url }) {
     );
   }
 
-  console.log('   ✓ 자동 재로그인 성공 — 세션을 새로 저장하고 발행을 계속합니다.');
-
-  // 로그인 직후에는 카카오→티스토리 콜백 리다이렉트가 아직 진행 중일 수 있다.
-  // 이 상태에서 바로 goto() 하면 진행 중이던 네비게이션과 충돌해 ERR_ABORTED 로 실패하므로,
-  // 현재 리다이렉트 체인이 끝나기를 기다린 뒤(best-effort) 재이동한다.
+  // TSSESSION 쿠키가 생겨도, 카카오가 "로그인 상태 유지/계속하기" 인터스티셜을 띄워 로그인 흐름이
+  // 끝까지 안 끝난 상태일 수 있다(특히 클라우드의 새 IP). 그러면 글쓰기 페이지가 다시 로그인으로 튕긴다.
+  // → 인터스티셜을 닫고, 글쓰기 페이지 접근을 여러 번 재시도해 세션 전파(느릴 수 있음)를 기다린다.
+  //   실제로 에디터에 도달한 뒤에만 "성공"으로 보고 세션을 저장한다.
+  await dismissKakaoInterstitial(page);
   await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-  await new Promise((r) => setTimeout(r, 1500));
 
+  let reached = false;
+  for (let attempt = 1; attempt <= 4 && !reached; attempt++) {
+    await retryGoto(page, url);
+    if (!(await isOnLoginScreen(page))) {
+      reached = true;
+      break;
+    }
+    // 아직 로그인 화면이면: 인터스티셜을 다시 닫아보고 잠시 기다린 뒤 재시도.
+    await dismissKakaoInterstitial(page);
+    await new Promise((r) => setTimeout(r, 2500));
+  }
+
+  if (!reached) {
+    throw new Error(
+      '자동 재로그인은 됐지만 글쓰기 페이지 접근에 실패했습니다\n' +
+      '  (카카오 로그인 후 추가 확인 단계가 남아있을 수 있습니다).\n' +
+      '  → 해결: "npm run login" 으로 직접 로그인해 세션을 새로 저장하세요.'
+    );
+  }
+
+  console.log('   ✓ 자동 재로그인 성공 — 세션을 새로 저장하고 발행을 계속합니다.');
   await context.storageState({ path: storagePath });
   if (!process.env.CI) syncSessionSecret(storagePath);
-
-  await retryGoto(page, url);
-  if (await isOnLoginScreen(page)) {
-    throw new Error('재로그인 후에도 글쓰기 페이지에 접근할 수 없습니다.');
-  }
 }
 
 /** ERR_ABORTED 등 일시적 네비게이션 충돌을 한 번 재시도한다. */
@@ -159,7 +177,26 @@ async function retryGoto(page, url) {
     await page.goto(url, { waitUntil: 'domcontentloaded' });
   } catch {
     await new Promise((r) => setTimeout(r, 1500));
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  }
+}
+
+/**
+ * 카카오 로그인 완료 후 남는 확인 인터스티셜("계속하기"/"로그인 상태 유지"/"확인" 등)이 있으면
+ * 눌러 로그인 흐름을 끝까지 완료시킨다(best-effort). 이 함수는 로그인/카카오 화면에서만 호출된다.
+ */
+async function dismissKakaoInterstitial(page) {
+  const labels = /계속하기|계속|로그인 상태 유지|유지하기|유지|확인|다음|예/;
+  try {
+    const btn = page
+      .getByRole('button', { name: labels })
+      .or(page.getByRole('link', { name: labels }));
+    if (await btn.first().isVisible({ timeout: 2000 }).catch(() => false)) {
+      await btn.first().click({ timeout: 3000 }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+    }
+  } catch {
+    // 인터스티셜이 없으면 무시
   }
 }
 

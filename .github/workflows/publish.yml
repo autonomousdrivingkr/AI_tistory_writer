@@ -71,6 +71,15 @@ jobs:
           if [ -n "$BLOG_INPUT" ]; then ARGS="$ARGS --blog $BLOG_INPUT"; fi
           node src/main.js $ARGS
 
+      - name: 실패 스크린샷 업로드
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fail-screenshots
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: 상태 커밋
         run: |
           git config user.name "tistory-bot"
