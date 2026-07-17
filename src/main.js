@@ -11,6 +11,8 @@ import { attachImages, cleanupTemp } from './images.js';
 import { relatedLinksHtml } from './related.js';
 import { sourceLinksHtml, placeLinksHtml } from './research.js';
 import { publishToTistory } from './publisher.js';
+import { publishToTibedra } from './tibedra-publisher.js';
+import { htmlToMarkdown } from './html-to-markdown.js';
 import { pullLatest, pushState } from './git-sync.js';
 
 function parseArgs() {
@@ -27,6 +29,8 @@ function parseArgs() {
     headful: args.includes('--headful'),
     noPublish: args.includes('--no-publish'),
     force: args.includes('--force'),
+    // tibedra(별도 플랫폼) 자동 처리를 이번 실행에서만 끈다(Tistory 만 테스트하고 싶을 때).
+    skipTibedra: args.includes('--skip-tibedra'),
     // 자동화(스케줄러에서 TTY 가 잡히는 드문 경우 등)에서 프롬프트를 강제로 끄는 탈출구
     yes: args.includes('--yes') || args.includes('-y')
   };
@@ -62,7 +66,10 @@ async function main() {
   const rl = interactive ? createInterface({ input: process.stdin, output: process.stdout }) : null;
 
   let targets;
-  if (opts.blog) {
+  if (opts.blog === 'tibedra') {
+    // tibedra 는 tistory.blogs 소속이 아니라 별도 플랫폼이라 아래 루프에서 처리하지 않는다.
+    targets = [];
+  } else if (opts.blog) {
     const picked = getBlogs(config).find((b) => b.id === opts.blog || b.blogName === opts.blog);
     if (!picked) {
       console.log(`❓ --blog "${opts.blog}" 에 해당하는 블로그가 config.json 에 없습니다.`);
@@ -87,6 +94,15 @@ async function main() {
     }
   } finally {
     if (rl) rl.close();
+  }
+
+  // 3.5) tibedra(별도 플랫폼) — Tistory 블로그들과 완전히 다른 방식이라 별도 단계로 처리한다.
+  //      --blog 로 특정 Tistory 블로그를 콕 집었으면 건너뛰고(스코프 밖), --no-publish/--skip-tibedra 로도 끌 수 있다.
+  const wantTibedra = config.tibedra?.enabled && !opts.noPublish && !opts.skipTibedra &&
+    (!opts.blog || opts.blog === 'tibedra');
+  if (wantTibedra) {
+    const published = await runForTibedra({ slot, now, opts, config, source });
+    if (published) publishedCount++;
   }
 
   // 4) 변경분(state.json / topics.*.json) 한 번에 커밋·푸시
@@ -201,6 +217,73 @@ async function runForBlog({ blog, slot, now, opts, config, source, rl }) {
   });
   markTopicDone(topicItem.topic, blog.topicsFile, { url });
   console.log(`📊 ${blog.label} 남은 주제: ${pendingCount(blog.topicsFile)}`);
+
+  return true;
+}
+
+/**
+ * tibedra(별도 플랫폼)용 처리. Tistory 블로그와 달리 대화형 주제 선택 없이 항상 첫 pending 주제를
+ * 쓰고, 발행은 절대 하지 않으며 관리자 페이지에 "초안"으로만 저장한다(사람이 최종 검토 후 발행).
+ * @returns {Promise<boolean>} 초안이 실제로 저장됐으면 true (커밋 대상 판단용)
+ */
+async function runForTibedra({ slot, now, opts, config, source }) {
+  const tc = config.tibedra;
+  const blogId = 'tibedra';
+  const key = slotKey(slot, now, blogId);
+
+  if (!opts.force && !opts.dryRun && isPublished(slot, now, blogId)) {
+    console.log('✅ Tibedra는 이 시간대에 이미 처리되었습니다. (중복 방지) 건너뜀.');
+    return false;
+  }
+
+  const topicItem = pickNextTopic(tc.topicsFile);
+  if (!topicItem) {
+    console.log(`📭 [Tibedra] 발행할 주제가 없습니다. ${tc.topicsFile} 에 주제를 추가하세요. (남은 주제: ${pendingCount(tc.topicsFile)})`);
+    return false;
+  }
+
+  console.log(`\n━━━━━━ 🌐 Tibedra (tibedra.com) ━━━━━━`);
+  console.log(`📌 주제: ${topicItem.topic}`);
+
+  console.log(`🤖 ${config.llm.provider}(으)로 글 생성 중...`);
+  const article = await generateArticle({ topic: topicItem.topic, instructions: topicItem.instructions, config });
+  console.log(`   제목: ${article.title}`);
+  console.log(`   태그: ${article.tags.join(', ')}`);
+
+  // Pexels 첫 사진의 원격 URL을 그대로 tibedra "대표 이미지 URL" 필드에 쓴다(파일 업로드 불필요).
+  const { html: htmlWithImages, images } = await attachImages(article, config);
+  article.html = htmlWithImages;
+  const imageUrl = images[0]?.url;
+  if (imageUrl) console.log('   🖼️  대표 이미지 URL 첨부');
+
+  if ((config.research?.attachSources ?? true) && article.sources?.length) {
+    const sources = sourceLinksHtml(article.sources);
+    if (sources) {
+      article.html += sources;
+      console.log('   🔎 참고 자료 출처 링크 추가');
+    }
+  }
+
+  if (opts.dryRun) {
+    const outDir = join(ROOT, 'output');
+    if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+    const file = join(outDir, `${key}.md`);
+    const markdown = await htmlToMarkdown(article.html);
+    writeFileSync(file, `# ${article.title}\n\n${markdown}`);
+    console.log(`🧪 dry-run(Tibedra): 미리보기 저장 → ${file} (초안 저장 안 함)`);
+    return false;
+  }
+
+  console.log('🚀 Tibedra 관리자 페이지에 초안 저장 중...');
+  const { url } = await publishToTibedra(article, config, { headful: opts.headful, blog: tc, imageUrl });
+  console.log(`   초안 저장됨: ${url || '(URL 확인 불가 — /admin/blog 에서 확인하세요)'} — 발행은 사람이 검토 후 직접 눌러야 합니다.`);
+
+  recordPublished({
+    key, blog: blogId, topic: topicItem.topic, title: article.title,
+    url: url || '', at: new Date().toISOString(), source, draft: true
+  });
+  markTopicDone(topicItem.topic, tc.topicsFile, { url });
+  console.log(`📊 Tibedra 남은 주제: ${pendingCount(tc.topicsFile)}`);
 
   return true;
 }

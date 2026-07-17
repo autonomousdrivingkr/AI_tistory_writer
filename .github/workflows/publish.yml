@@ -40,6 +40,7 @@ jobs:
       TISTORY_STORAGE_STATE: ${{ secrets.TISTORY_STORAGE_STATE }}
       KAKAO_EMAIL: ${{ secrets.KAKAO_EMAIL }}              # 세션 만료 시 자동 재로그인 폴백용
       KAKAO_PASSWORD: ${{ secrets.KAKAO_PASSWORD }}
+      TIBEDRA_ADMIN_PASSWORD: ${{ secrets.TIBEDRA_ADMIN_PASSWORD }}  # tibedra.com 관리자 비번(별도 사이트, 초안 저장용)
     steps:
       - uses: actions/checkout@v4
 

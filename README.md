@@ -159,6 +159,10 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-task-scheduler.ps1
 - `tistory.defaultBlog`: 자동 발행(스케줄러·GitHub)에서 발행할 블로그 `id`(없으면 첫 번째).
 - `tistory.publish`: `false` 로 두면 발행 직전까지만 하고 멈춤(테스트용). 블로그별로 `blogs[].publish` 로 덮어쓸 수 있음.
 - `tistory.publishVisibility`: `public`(공개) / `private`(비공개). 블로그별로 `blogs[].publishVisibility` 로 덮어쓸 수 있음.
+- `tibedra`: Tistory 가 아닌 별도 사이트(tibedra.com, 자체 관리자 페이지). `tibedra.enabled=true` + `.env` 의 `TIBEDRA_ADMIN_PASSWORD` 필요.
+  주제 큐는 `topics.tibedra.json`. **자동 실행은 항상 "초안"으로만 저장하고 발행하지 않는다** — tibedra 관리자 페이지 자체가
+  "초안 검토 후 사람이 발행" 하는 구조라 그 흐름을 따른다. 확인·발행은 `https://tibedra.com/admin/blog` 에서 직접.
+  `--blog tibedra` 로 이것만 단독 실행, `--skip-tibedra` 로 이번 실행에서만 제외 가능.
 - `images.enabled`: `true` 면 본문에 관련 사진을 자동 삽입(무료 `PEXELS_API_KEY` 필요).
 - `images.perArticle`: 글 1편에 넣을 사진 수(기본 3). `images.orientation`: `landscape`/`portrait`/`square`.
 - `schedule.slots`: 아침/저녁 시간대 범위(슬롯 자동 판별용).

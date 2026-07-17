@@ -43,6 +43,12 @@
       }
     ]
   },
+  "tibedra": {
+    "enabled": true,
+    "topicsFile": "topics.tibedra.json",
+    "defaultCategory": "투자",
+    "author": "Derek Ji"
+  },
   "images": {
     "enabled": true,
     "provider": "pexels",
