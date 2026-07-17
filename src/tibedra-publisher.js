@@ -76,7 +76,7 @@ export async function publishToTibedra(article, config, opts = {}) {
     ]);
     await page.waitForTimeout(1000);
 
-    const url = await findDraftUrl(page, article.title);
+    const url = await findDraftUrl(page);
     await browser.close();
     return { url };
   } catch (err) {
@@ -86,13 +86,18 @@ export async function publishToTibedra(article, config, opts = {}) {
   }
 }
 
-/** 방금 저장한 초안의 편집 링크에서 slug 를 뽑아 공개 URL(발행 전이라 아직 비공개) 형태로 돌려준다. */
-async function findDraftUrl(page, title) {
+/**
+ * 방금 저장한 초안의 편집 링크에서 slug 를 뽑아 공개 URL(발행 전이라 아직 비공개) 형태로 돌려준다.
+ * 목록이 최신순 정렬이라, 저장 직후 목록의 첫 "수정" 링크가 곧 방금 만든 초안이다.
+ */
+async function findDraftUrl(page) {
   try {
     await page.goto(`${BASE_URL}/admin/blog`, { waitUntil: 'networkidle', timeout: 20000 });
-    const row = page.locator('li, tr, div').filter({ hasText: title }).last();
-    const editLink = row.locator('a[href*="/admin/blog/"][href*="/edit"]').first();
-    const href = await editLink.getAttribute('href', { timeout: 5000 }).catch(() => null);
+    const href = await page
+      .locator('a[href*="/admin/blog/"][href*="/edit"]')
+      .first()
+      .getAttribute('href', { timeout: 5000 })
+      .catch(() => null);
     if (!href) return null;
     const slug = href.match(/\/admin\/blog\/([^/]+)\/edit/)?.[1];
     return slug ? `${BASE_URL}/blog/${slug}` : null;
