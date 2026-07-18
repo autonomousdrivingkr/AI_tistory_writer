@@ -39,6 +39,15 @@ export async function publishToTistory(article, config, opts = {}) {
   const browser = await chromium.launch({ headless });
   const context = await browser.newContext({ storageState: storagePath });
   const page = await context.newPage();
+  // 조용히 버퍼링만 해두고, 발행이 안 끝나고 멈췄을 때(dumpPublishStuck)만 출력한다
+  // (매 실행마다 콘솔에 쏟아내면 정상 케이스에서 노이즈만 커진다).
+  const consoleErrors = [];
+  const postRequests = [];
+  page.on('console', (msg) => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
+  page.on('pageerror', (err) => consoleErrors.push('pageerror: ' + err.message));
+  page.on('response', (res) => {
+    if (res.request().method() !== 'GET') postRequests.push(`${res.request().method()} ${res.status()} ${res.url()}`);
+  });
 
   try {
     const url = `https://${blogName}.tistory.com/manage/newpost/`;
@@ -85,7 +94,7 @@ export async function publishToTistory(article, config, opts = {}) {
     await fillTags(page, sel, article.tags || []);
 
     // 4) 발행
-    const postUrl = await publish(page, sel, blog);
+    const postUrl = await publish(page, sel, blog, { consoleErrors, postRequests });
 
     await context.close();
     await browser.close();
@@ -418,7 +427,7 @@ async function fillTags(page, sel, tags) {
   }
 }
 
-async function publish(page, sel, blog) {
+async function publish(page, sel, blog, diag = {}) {
   if (!blog.publish) {
     console.log('ℹ️  publish=false → 발행하지 않고 임시 상태로 둡니다.');
     return null;
@@ -442,16 +451,72 @@ async function publish(page, sel, blog) {
 
   // 발행이 끝나면 글 본문 페이지(.../<글번호> 또는 .../entry/...)로 이동한다.
   // 그 이동을 명시적으로 기다려야 실제 글 URL 을 잡을 수 있다(내부 링크·state 기록용).
-  // 기다리지 못하면(셀렉터/리다이렉트 변화 등) 기존처럼 4초 후 현재 URL 로 폴백한다.
+  // 기다리지 못하면(셀렉터/리다이렉트 변화 등) 기존처럼 폴백한다.
   const postUrlRe = new RegExp(`${blog.blogName}\\.tistory\\.com/(?:entry/|\\d)`, 'i');
   try {
-    await page.waitForURL(postUrlRe, { timeout: 10000 });
+    await page.waitForURL(postUrlRe, { timeout: 20000 });
   } catch {
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(8000);
   }
   const finalUrl = page.url();
   // 관리 화면(/manage/)에 머물러 있으면 실제 글 URL 을 못 잡은 것 → null.
-  return postUrlRe.test(finalUrl) ? finalUrl : null;
+  if (!postUrlRe.test(finalUrl)) {
+    await dumpPublishStuck(page, finalUrl, diag);
+    return null;
+  }
+  return finalUrl;
+}
+
+/**
+ * 발행 클릭 후에도 글 URL로 못 넘어갔을 때(예외 없이 조용히 null 이 되는 케이스) 원인을
+ * 눈으로 확인할 수 있도록 스크린샷을 남긴다. dumpFailure 와 달리 예외가 없어도 호출된다.
+ */
+async function dumpPublishStuck(page, finalUrl, { consoleErrors, postRequests } = {}) {
+  try {
+    if (!existsSync(LOGS_DIR)) mkdirSync(LOGS_DIR, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const shot = join(LOGS_DIR, `publish-stuck-${ts}.png`);
+    await page.screenshot({ path: shot, fullPage: true });
+    console.warn(`   ⚠️  발행 후 글 URL 이동을 확인 못함 (머문 URL: ${finalUrl}). 스크린샷: ${shot}`);
+
+    // 2026-07-18: 발행 버튼 클릭 후 dkaptcha(다음/카카오 캡차) 위젯 호출만 있고 실제 저장
+    // 요청은 안 나가는 패턴이 반복 확인됨 — 아마도 잦은 자동 발행 때문에 캡차 게이트가 걸린 것으로 보임.
+    // 사람이 브라우저에서 직접 한 번 발행해 캡차를 통과시켜야 풀릴 가능성이 높다.
+    if (postRequests?.some((r) => /dkaptcha/i.test(r))) {
+      console.warn(
+        '   🚨 캡차(dkaptcha) 위젯 호출이 감지됐고, 그 이후 실제 발행 요청이 나가지 않았습니다.\n' +
+        '      → 티스토리가 이 계정의 발행에 캡차 인증을 요구하는 것으로 보입니다(자동화가 못 품).\n' +
+        '      → "npm run login" 이나 브라우저에서 직접 로그인해 수동으로 한 번 발행해보세요.'
+      );
+    }
+    if (postRequests?.length) {
+      console.warn(`   🌐 발행 흐름 중 POST 요청 ${postRequests.length}건:`);
+      for (const r of postRequests.slice(-15)) console.warn(`      - ${r}`);
+    }
+    if (consoleErrors?.length) {
+      console.warn(`   ⚠️  브라우저 콘솔 에러 ${consoleErrors.length}건:`);
+      for (const e of consoleErrors.slice(0, 10)) console.warn(`      - ${e}`);
+    }
+    const dialogInfo = await page.evaluate(() => {
+      const out = [];
+      document.querySelectorAll('iframe').forEach((f) => out.push(`iframe: ${f.src || '(no src)'} class=${f.className}`));
+      document.querySelectorAll('[role="dialog"], [class*="modal" i], [class*="layer" i][class*="pop" i]').forEach((el) => {
+        const text = (el.textContent || '').trim();
+        if (text) {
+          out.push(`dialog-like <${el.tagName} class="${el.className}"> text="${text.slice(0, 100)}"`);
+        } else {
+          out.push(`EMPTY dialog-like <${el.tagName} class="${el.className}"> innerHTML="${el.innerHTML.slice(0, 500)}"`);
+        }
+      });
+      return out;
+    }).catch((e) => [`evaluate 실패: ${e.message}`]);
+    if (dialogInfo.length) {
+      console.warn('   🔍 페이지 내 iframe/모달 후보:');
+      for (const d of dialogInfo.slice(0, 15)) console.warn(`      - ${d}`);
+    }
+  } catch {
+    // 스크린샷 실패는 무시
+  }
 }
 
 async function dumpFailure(page, err) {
