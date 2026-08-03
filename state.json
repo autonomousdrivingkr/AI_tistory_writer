@@ -1008,6 +1008,16 @@
       "url": "",
       "at": "2026-08-03T14:32:59.245Z",
       "source": "pc"
+    },
+    {
+      "key": "2026-08-03-morning-tibedra",
+      "blog": "tibedra",
+      "topic": "AI 데이터센터와 전력 수요: 에너지 인프라 산업이 주목받는 이유",
+      "title": "AI 데이터센터, 전력 수요 폭증으로 에너지 인프라 산업이 뜨는 이유",
+      "url": "https://tibedra.com/blog/2026-08-03-12490e3",
+      "at": "2026-08-03T14:35:03.816Z",
+      "source": "pc",
+      "draft": true
     }
   ]
 }
